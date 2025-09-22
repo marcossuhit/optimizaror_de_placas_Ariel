@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1222" />
+    <title>Planificador de Cortes</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Planificador de Cortes para Carpintería</h1>
+    </header>
+
+    <main class="container">
+      <section class="controls">
+        <div class="project">
+          <label for="projectName">Nombre del proyecto</label>
+          <input id="projectName" type="text" placeholder="Ej: Muebles Juan – Biblioteca" />
+        </div>
+        <div class="export-group">
+          <button id="installBtn" class="btn" style="display:none">Instalar app</button>
+          <button id="saveJsonBtn" class="btn">Guardar</button>
+          <button id="loadJsonBtn" class="btn">Cargar</button>
+          <button id="exportPngBtn" class="btn">Exportar PNG</button>
+          <button id="exportPdfBtn" class="btn">Exportar PDF</button>
+        </div>
+      </section>
+
+      <div class="main-grid">
+        <div class="stack">
+          <section class="sheet">
+            <h2 class="sheet-title">Placas</h2>
+            <div class="plates-controls">
+              <button id="addPlateBtn" class="btn">Agregar placa</button>
+              <span class="limit-note">Agrega una o más placas (ancho, alto, cantidad)</span>
+            </div>
+            <div id="plates" class="plates"></div>
+          </section>
+
+          <section class="rows-header">
+            <p class="rows-intro">
+              Complete la(s) placa(s) para habilitar filas. Ingrese hasta 15 tipos de cortes. Cada fila muestra un rectángulo con bordes clicables para marcar selección.
+            </p>
+            <div class="rows-controls">
+              <button id="addRowBtn" class="btn primary">Agregar fila</button>
+              <button id="clearAllBtn" class="btn">Limpiar todo</button>
+              <span id="addRowHint" class="hint-inline"></span>
+              <span class="limit-note">Límite: 15 filas</span>
+            </div>
+          </section>
+
+          <section id="rows" class="rows">
+            <!-- Las filas se agregan dinámicamente -->
+          </section>
+        </div>
+
+        <aside class="summary" id="summaryPanel">
+          <h2 class="summary-title">Resumen</h2>
+          <div id="summaryPieces" class="summary-stat">Piezas colocadas: 0</div>
+          <div id="summaryArea" class="summary-stat">Área utilizada: 0 m²</div>
+          <div id="summaryUtil" class="summary-stat">Aprovechamiento: 0%</div>
+          <div id="summaryWaste" class="summary-stat">Desperdicio: 0 m² (0%)</div>
+          <div id="summaryReq" class="summary-stat">Cortes pedidos: 0</div>
+          <div id="summaryPlaced" class="summary-stat">Colocados: 0</div>
+          <div id="summaryLeft" class="summary-stat">Fuera: 0</div>
+          <ul id="summaryList" class="summary-list"></ul>
+          <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 cm</div>
+        </aside>
+      </div>
+
+      <section class="sheet-overview">
+        <h2 class="sheet-title">Placa completa</h2>
+        <div id="sheetCanvas" class="sheet-canvas">
+          <div class="hint">Configure la placa para ver la vista</div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>
+        Sugerencia: haga clic en los bordes del dibujo para marcarlos. Los tamaños son relativos (se ajustan para encajar en la vista previa).
+      </p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+  </html>
