@@ -1293,8 +1293,9 @@ loadTheme();
 
 // --- Analytics opcional (GA4) ---
 (function initGA(){
-  const id = window.GA_MEASUREMENT_ID;
-  if (!id) return;
+  const lsId = localStorage.getItem('ga_measurement_id') || '';
+  const id = (lsId || window.GA_MEASUREMENT_ID || '').trim();
+  if (!id || window.__gaInit) return;
   const s = document.createElement('script');
   s.async = true; s.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;
   document.head.appendChild(s);
@@ -1302,12 +1303,14 @@ loadTheme();
   function gtag(){ dataLayer.push(arguments); }
   window.gtag = gtag;
   gtag('js', new Date());
-  gtag('config', id);
+  gtag('config', id, { send_page_view: true, debug_mode: true, anonymize_ip: true });
+  gtag('event', 'page_view', { page_title: document.title, page_location: location.href, page_path: location.pathname });
   gtag('event', 'visit', {
     user_agent: navigator.userAgent,
     platform: navigator.platform,
     language: navigator.language
   });
+  window.__gaInit = true;
 })();
 
 // --- Registro local de visitas + panel oculto ---
@@ -1346,3 +1349,18 @@ window.addEventListener('keydown', (e) => {
 const clearBtn = document.getElementById('clearVisitsBtn');
 if (clearBtn) clearBtn.addEventListener('click', () => { localStorage.removeItem(VISITS_KEY); renderVisits(); });
 recordVisit();
+
+// Guardar GA ID desde panel oculto
+const saveGaBtn = document.getElementById('saveGaIdBtn');
+const gaIdInput = document.getElementById('gaIdInput');
+if (gaIdInput) {
+  const current = localStorage.getItem('ga_measurement_id') || (window.GA_MEASUREMENT_ID || '');
+  gaIdInput.value = current;
+}
+if (saveGaBtn && gaIdInput) {
+  saveGaBtn.addEventListener('click', () => {
+    const val = (gaIdInput.value || '').trim();
+    localStorage.setItem('ga_measurement_id', val);
+    alert('GA4 ID guardado localmente. Recargá la página para iniciar el tracking.');
+  });
+}

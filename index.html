@@ -99,9 +99,14 @@
             <tbody></tbody>
           </table>
         </div>
-        <div style="margin-top:8px; display:flex; gap:8px;">
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           <button id="clearVisitsBtn" class="btn">Borrar registros locales</button>
           <span class="hint-inline">Atajo: Ctrl+Shift+L para mostrar/ocultar</span>
+          <div style="margin-left:auto; display:flex; gap:6px; align-items:center;">
+            <label class="hint-inline">GA4 ID:</label>
+            <input id="gaIdInput" type="text" placeholder="G-XXXXXXXXXX" style="height:34px; padding:0 8px; border-radius:8px; border:1px solid #233046; background:#0e1629; color:var(--text); min-width:180px;" />
+            <button id="saveGaIdBtn" class="btn">Guardar GA ID</button>
+          </div>
         </div>
       </section>
     </main>
