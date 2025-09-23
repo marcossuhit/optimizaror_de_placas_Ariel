@@ -7,6 +7,10 @@
     <title>Planificador de Cortes</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="style.css" />
+    <!-- Opcional: Google Analytics. Reemplaza G-XXXXXXXXXX con tu ID o deja vacío para desactivar -->
+    <script>
+      window.GA_MEASUREMENT_ID = '';
+    </script>
   </head>
   <body>
     <header class="app-header">
@@ -25,6 +29,7 @@
           <button id="loadJsonBtn" class="btn">Cargar</button>
           <button id="exportPngBtn" class="btn">Exportar PNG</button>
           <button id="exportPdfBtn" class="btn">Exportar PDF</button>
+          <button id="themeToggle" class="btn">Modo claro</button>
         </div>
       </section>
 
@@ -35,6 +40,10 @@
             <div class="plates-controls">
               <button id="addPlateBtn" class="btn">Agregar placa</button>
               <span class="limit-note">Agrega una o más placas (ancho, alto, cantidad)</span>
+              <div class="field kerf-field">
+                <label for="kerfInput">Desp. de Sierra (mm)</label>
+                <input id="kerfInput" type="number" value="0" min="0" step="1" />
+              </div>
             </div>
             <div id="plates" class="plates"></div>
           </section>
@@ -48,6 +57,9 @@
               <button id="clearAllBtn" class="btn">Limpiar todo</button>
               <span id="addRowHint" class="hint-inline"></span>
               <span class="limit-note">Límite: 15 filas</span>
+              <label class="hint-inline" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;">
+                <input id="autoRotateToggle" type="checkbox" /> Rotación automática permitida
+              </label>
             </div>
           </section>
 
@@ -76,13 +88,25 @@
           <div class="hint">Configure la placa para ver la vista</div>
         </div>
       </section>
+
+      <!-- Panel oculto de visitas (solo visible con atajo) -->
+      <section id="adminPanel" style="display:none; margin-top:16px;" class="sheet">
+        <h2 class="sheet-title">Visitas (local)</h2>
+        <div id="visitSummary" class="summary-stat"></div>
+        <div style="overflow:auto; max-height:260px; border:1px dashed #223048; padding:8px; border-radius:8px;">
+          <table id="visitTable" style="width:100%; border-collapse:collapse; font-size:.9rem;">
+            <thead><tr><th style="text-align:left; padding:4px;">Fecha</th><th style="text-align:left; padding:4px;">Agente</th><th style="text-align:left; padding:4px;">Plataforma</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button id="clearVisitsBtn" class="btn">Borrar registros locales</button>
+          <span class="hint-inline">Atajo: Ctrl+Shift+L para mostrar/ocultar</span>
+        </div>
+      </section>
     </main>
 
-    <footer class="app-footer">
-      <p>
-        Sugerencia: haga clic en los bordes del dibujo para marcarlos. Los tamaños son relativos (se ajustan para encajar en la vista previa).
-      </p>
-    </footer>
+    
 
     <script src="app.js"></script>
   </body>

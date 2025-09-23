@@ -9,9 +9,12 @@ const loadJsonBtn = document.getElementById('loadJsonBtn');
 const exportPngBtn = document.getElementById('exportPngBtn');
 const exportPdfBtn = document.getElementById('exportPdfBtn');
 const installBtn = document.getElementById('installBtn');
+const autoRotateToggle = document.getElementById('autoRotateToggle');
+const themeToggleBtn = document.getElementById('themeToggle');
 // Placas dinámicas (lista)
 const platesEl = document.getElementById('plates');
 const addPlateBtn = document.getElementById('addPlateBtn');
+const kerfInput = document.getElementById('kerfInput');
 const summaryTotalEl = document.getElementById('summaryTotal');
 const summaryListEl = document.getElementById('summaryList');
 const sheetCanvasEl = document.getElementById('sheetCanvas');
@@ -51,14 +54,21 @@ function updateRowSummaryUI() {
   }
 }
 
-// Paleta de colores para filas
-const ROW_COLORS = [
+// Paletas de colores para filas (oscuro y claro)
+const ROW_COLORS_DARK = [
   '#60a5fa', '#f472b6', '#34d399', '#fbbf24', '#a78bfa',
   '#f87171', '#22d3ee', '#c084fc', '#fb923c', '#4ade80',
   '#93c5fd', '#fca5a5', '#fdba74', '#86efac', '#67e8f9'
 ];
+const ROW_COLORS_LIGHT = [
+  '#93c5fd', '#f9a8d4', '#86efac', '#fde68a', '#c4b5fd',
+  '#fecaca', '#a5f3fc', '#e9d5ff', '#fed7aa', '#bbf7d0',
+  '#bfdbfe', '#fecdd3', '#fed7aa', '#dcfce7', '#bae6fd'
+];
 function getRowColor(idx) {
-  return ROW_COLORS[idx % ROW_COLORS.length];
+  const isLight = document.body.classList.contains('theme-light');
+  const arr = isLight ? ROW_COLORS_LIGHT : ROW_COLORS_DARK;
+  return arr[idx % arr.length];
 }
 
 function getRows() {
@@ -105,12 +115,16 @@ function getPlates() {
   const list = [];
   if (!platesEl) return list;
   platesEl.querySelectorAll('.plate-row').forEach((row) => {
-    const inputs = row.querySelectorAll('input');
-    if (inputs.length < 3) return;
-    const sw = parseFloat(inputs[0].value);
-    const sh = parseFloat(inputs[1].value);
-    const sc = parseInt(inputs[2].value, 10);
-    if (sw > 0 && sh > 0 && sc >= 1) list.push({ sw, sh, sc });
+    const sw = parseFloat(row.querySelector('input.plate-w')?.value ?? '');
+    const sh = parseFloat(row.querySelector('input.plate-h')?.value ?? '');
+    const sc = parseInt(row.querySelector('input.plate-c')?.value ?? '', 10);
+    const tmm = parseInt(row.querySelector('input.trim-mm')?.value ?? '0', 10) || 0;
+    const sides = row.querySelectorAll('.trim-controls .side input');
+    const top = !!sides[0]?.checked;
+    const right = !!sides[1]?.checked;
+    const bottom = !!sides[2]?.checked;
+    const left = !!sides[3]?.checked;
+    if (sw > 0 && sh > 0 && sc >= 1) list.push({ sw, sh, sc, trim: { mm: tmm, top, right, bottom, left } });
   });
   return list;
 }
@@ -122,6 +136,13 @@ function getPrimaryPlateDims() {
 
 function isSheetComplete() {
   return getPlates().length > 0;
+}
+
+function getKerfCm() {
+  const v = parseInt(kerfInput?.value ?? '0', 10);
+  if (isNaN(v) || v < 0) return 0;
+  // Input en mm, convertir a cm
+  return v / 10;
 }
 
 function makeRow(index) {
@@ -277,13 +298,18 @@ function makeRow(index) {
     g.appendChild(hot);
   }
 
-  // Etiqueta de dimensiones
+  // Etiqueta de dimensiones arriba a la derecha + fondo
+  const dimsBg = document.createElementNS(svgNS, 'rect');
+  dimsBg.setAttribute('class', 'dims-badge');
+  dimsBg.setAttribute('rx', '4');
   const dims = document.createElementNS(svgNS, 'text');
   dims.setAttribute('class', 'dims-label');
-  dims.setAttribute('x', String(VIEW_W / 2));
-  dims.setAttribute('y', String(VIEW_H / 2 + 3));
-  dims.setAttribute('text-anchor', 'middle');
+  dims.setAttribute('x', String(VIEW_W - 6));
+  dims.setAttribute('y', String(6));
+  dims.setAttribute('text-anchor', 'end');
+  dims.setAttribute('dominant-baseline', 'hanging');
   svg.appendChild(g);
+  svg.appendChild(dimsBg);
   svg.appendChild(dims);
   svgWrap.appendChild(svg);
   preview.appendChild(svgWrap);
@@ -356,6 +382,34 @@ function makeRow(index) {
     rect.setAttribute('y', String(ry));
     rect.setAttribute('width', String(rw));
     rect.setAttribute('height', String(rh));
+    // Posicionar etiqueta arriba-derecha del preview y dibujar fondo
+    const padEdge = 6;
+    dims.setAttribute('x', String(VIEW_W - padEdge));
+    dims.setAttribute('y', String(padEdge));
+    const text = dims.textContent || '';
+    if (text) {
+      // calcular bbox una vez que el texto existe
+      const bb = dims.getBBox();
+      const pad = 3;
+      const bx = bb.x - pad;
+      const by = bb.y - pad;
+      const bw = bb.width + pad * 2;
+      const bh = bb.height + pad * 2;
+      dimsBg.setAttribute('x', String(bx));
+      dimsBg.setAttribute('y', String(by));
+      dimsBg.setAttribute('width', String(Math.max(1, bw)));
+      dimsBg.setAttribute('height', String(Math.max(1, bh)));
+      // color según tema
+      const isLight = document.body.classList.contains('theme-light');
+      const fill = isLight ? '#ffffffcc' : '#00000066';
+      const stroke = isLight ? '#94a3b866' : '#ffffff33';
+      dimsBg.setAttribute('fill', fill);
+      dimsBg.setAttribute('stroke', stroke);
+      dimsBg.setAttribute('stroke-width', '0.5');
+      dimsBg.style.display = '';
+    } else {
+      dimsBg.style.display = 'none';
+    }
 
     // Inset dinámico para no colapsar los lados en piezas muy chicas
     const inset = Math.max(1, Math.min(EDGE_INSET, rw * 0.5 - 2, rh * 0.5 - 2));
@@ -475,26 +529,47 @@ function makePlateRow() {
 
   const fW = document.createElement('div'); fW.className = 'field';
   const lW = document.createElement('label'); lW.textContent = 'Ancho (cm)';
-  const iW = document.createElement('input'); iW.type = 'number'; iW.min = '0'; iW.step = '0.1'; iW.placeholder = 'Ej: 244';
+  const iW = document.createElement('input'); iW.className = 'plate-w'; iW.type = 'number'; iW.min = '0'; iW.step = '0.1'; iW.placeholder = 'Ej: 244';
   fW.appendChild(lW); fW.appendChild(iW);
 
   const fH = document.createElement('div'); fH.className = 'field';
   const lH = document.createElement('label'); lH.textContent = 'Alto (cm)';
-  const iH = document.createElement('input'); iH.type = 'number'; iH.min = '0'; iH.step = '0.1'; iH.placeholder = 'Ej: 122';
+  const iH = document.createElement('input'); iH.className = 'plate-h'; iH.type = 'number'; iH.min = '0'; iH.step = '0.1'; iH.placeholder = 'Ej: 122';
   fH.appendChild(lH); fH.appendChild(iH);
 
   const fC = document.createElement('div'); fC.className = 'field';
   const lC = document.createElement('label'); lC.textContent = 'Cantidad';
-  const iC = document.createElement('input'); iC.type = 'number'; iC.min = '1'; iC.step = '1'; iC.value = '1';
+  const iC = document.createElement('input'); iC.className = 'plate-c'; iC.type = 'number'; iC.min = '1'; iC.step = '1'; iC.value = '1';
   fC.appendChild(lC); fC.appendChild(iC);
+
+  const trim = document.createElement('div');
+  trim.className = 'trim-wrap';
+  const trimControls = document.createElement('div');
+  trimControls.className = 'trim-controls';
+  const trimLabel = document.createElement('div'); trimLabel.className = 'trim-label'; trimLabel.innerHTML = 'Refilado <span class="trim-badge">naranja</span> (mm) + lados';
+  const trimMm = document.createElement('input'); trimMm.className = 'trim-mm'; trimMm.type = 'number'; trimMm.min = '0'; trimMm.step = '1'; trimMm.value = '0'; trimMm.title = 'Refilado en milímetros';
+  const sideTop = document.createElement('label'); sideTop.className = 'side'; const cTop = document.createElement('input'); cTop.type = 'checkbox'; sideTop.appendChild(cTop); sideTop.appendChild(document.createTextNode('Arriba'));
+  const sideRight = document.createElement('label'); sideRight.className = 'side'; const cRight = document.createElement('input'); cRight.type = 'checkbox'; sideRight.appendChild(cRight); sideRight.appendChild(document.createTextNode('Derecha'));
+  const sideBottom = document.createElement('label'); sideBottom.className = 'side'; const cBottom = document.createElement('input'); cBottom.type = 'checkbox'; sideBottom.appendChild(cBottom); sideBottom.appendChild(document.createTextNode('Abajo'));
+  const sideLeft = document.createElement('label'); sideLeft.className = 'side'; const cLeft = document.createElement('input'); cLeft.type = 'checkbox'; sideLeft.appendChild(cLeft); sideLeft.appendChild(document.createTextNode('Izquierda'));
+  trimControls.appendChild(trimLabel);
+  trimControls.appendChild(trimMm);
+  trimControls.appendChild(sideTop);
+  trimControls.appendChild(sideRight);
+  trimControls.appendChild(sideBottom);
+  trimControls.appendChild(sideLeft);
+  trim.appendChild(trimControls);
 
   const del = document.createElement('button'); del.className = 'btn remove'; del.textContent = 'Eliminar';
   del.addEventListener('click', () => { row.remove(); applyPlatesGate(); });
 
   const onChange = () => { applyPlatesGate(); };
   iW.addEventListener('input', onChange); iH.addEventListener('input', onChange); iC.addEventListener('input', onChange);
+  trimMm.addEventListener('input', onChange);
+  [cTop, cRight, cBottom, cLeft].forEach(ch => ch.addEventListener('change', onChange));
 
   row.appendChild(fW); row.appendChild(fH); row.appendChild(fC); row.appendChild(del);
+  row.appendChild(trim);
   return row;
 }
 
@@ -521,6 +596,7 @@ if (platesEl && addPlateBtn) {
     ensureDefaultRows();
   }
 }
+if (kerfInput) kerfInput.addEventListener('input', () => { applyPlatesGate(); });
 
 // -------- Persistencia (Guardar/Cargar) --------
 function serializeState() {
@@ -536,7 +612,9 @@ function serializeState() {
     return { qty, w, h, rot, edges };
   });
   const name = (projectNameEl?.value || '').trim();
-  return { name, plates, rows };
+  const kerfMm = parseInt(kerfInput?.value ?? '0', 10) || 0;
+  const autoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
+  return { name, plates, rows, kerfMm, autoRotate };
 }
 
 function persistState() {
@@ -576,14 +654,24 @@ function clearAllPlates() {
 function loadState(state) {
   clearAllPlates();
   if (projectNameEl && typeof state.name === 'string') projectNameEl.value = state.name;
+  if (kerfInput && typeof state.kerfMm === 'number') kerfInput.value = String(state.kerfMm);
+  if (autoRotateToggle && typeof state.autoRotate === 'boolean') autoRotateToggle.checked = !!state.autoRotate;
   // Cargar placas
   if (platesEl && Array.isArray(state.plates)) {
     state.plates.forEach(p => {
       const r = makePlateRow();
-      const inputs = r.querySelectorAll('input');
-      inputs[0].value = String(p.sw || '');
-      inputs[1].value = String(p.sh || '');
-      inputs[2].value = String(p.sc || 1);
+      r.querySelector('input.plate-w').value = String(p.sw || '');
+      r.querySelector('input.plate-h').value = String(p.sh || '');
+      r.querySelector('input.plate-c').value = String(p.sc || 1);
+      if (p.trim) {
+        const tmm = r.querySelector('input.trim-mm');
+        if (tmm) tmm.value = String(p.trim.mm || 0);
+        const sides = r.querySelectorAll('.trim-controls .side input');
+        if (sides[0]) sides[0].checked = !!p.trim.top;
+        if (sides[1]) sides[1].checked = !!p.trim.right;
+        if (sides[2]) sides[2].checked = !!p.trim.bottom;
+        if (sides[3]) sides[3].checked = !!p.trim.left;
+      }
       platesEl.appendChild(r);
     });
   }
@@ -806,9 +894,9 @@ function renderSheetOverview() {
     return;
   }
   const sc = plates.reduce((sum, p) => sum + p.sc, 0);
-  // Expandir a instancias
+  // Expandir a instancias, preservando refilado por placa
   const instances = [];
-  plates.forEach(p => { for (let i = 0; i < p.sc; i++) instances.push({ sw: p.sw, sh: p.sh }); });
+  plates.forEach(p => { for (let i = 0; i < p.sc; i++) instances.push({ sw: p.sw, sh: p.sh, trim: p.trim || { mm: 0, top: false, right: false, bottom: false, left: false } }); });
   const svgNS = 'http://www.w3.org/2000/svg';
   const holder = document.createElement('div');
   holder.className = 'sheet-multi';
@@ -824,41 +912,110 @@ function renderSheetOverview() {
     const h = parseFloat(inputs[2].value);
     if (!(qty >= 1 && w > 0 && h > 0)) return;
     const rot = row._getRotation ? row._getRotation() : false;
+    const rawW = rot ? h : w;
+    const rawH = rot ? w : h;
+    const kerf = getKerfCm();
     for (let i = 0; i < qty; i++) {
-      pieces.push({ rowIdx: idx, w: rot ? h : w, h: rot ? w : h, color: getRowColor(idx), rot });
+      pieces.push({ rowIdx: idx, w: rawW, h: rawH, rawW, rawH, color: getRowColor(idx), rot, kerf });
     }
     totalRequested += qty;
   });
 
-  // Ordenar piezas por alto desc para packing tipo shelf
-  pieces.sort((a, b) => b.h - a.h);
+  // Ordenar piezas por alto desc para ayudar al Skyline (heurística)
+  pieces.sort((a, b) => b.h - a.h || b.w - a.w);
 
   const allPlaced = [];
   let queue = pieces.slice();
+  const allowAutoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
 
   for (let plateIdx = 0; plateIdx < instances.length; plateIdx++) {
-    const { sw, sh } = instances[plateIdx];
-    // Shelf packing para esta placa
-    let curX = 0, curY = 0, shelfH = 0;
+    const { sw, sh, trim } = instances[plateIdx];
+    // Refilado (mm -> cm)
+    const tcm = Math.max(0, ((trim && trim.mm) || 0) / 10);
+    const leftT = trim && trim.left ? tcm : 0;
+    const rightT = trim && trim.right ? tcm : 0;
+    const topT = trim && trim.top ? tcm : 0;
+    const bottomT = trim && trim.bottom ? tcm : 0;
+    const usableW = Math.max(0, sw - leftT - rightT);
+    const usableH = Math.max(0, sh - topT - bottomT);
+    const offX = leftT;
+    const offY = topT;
+
+    // Skyline-BL (sin rotación, sin kerf en los bordes; kerf entre piezas opcional en futuro)
     const placed = [];
     const nextQueue = [];
-    const canStartShelf = (h) => (curY + h) <= sh;
-    const startNewShelf = (h) => { curX = 0; shelfH = h; };
+    const skyline = [{ x: 0, y: 0, width: usableW }];
+
+    const fits = (index, w, h) => {
+      let x = skyline[index].x;
+      if (x + w > usableW) return { ok: false };
+      let widthLeft = w;
+      let j = index;
+      let topY = 0;
+      while (widthLeft > 0) {
+        if (j >= skyline.length) return { ok: false };
+        topY = Math.max(topY, skyline[j].y);
+        if (topY + h > usableH) return { ok: false };
+        widthLeft -= skyline[j].width;
+        j++;
+      }
+      return { ok: true, y: topY };
+    };
+
+    const addSkylineLevel = (index, x, y, w, h) => {
+      skyline.splice(index, 0, { x, y: y + h, width: w });
+      // Ajustar solapes
+      for (let i = index + 1; i < skyline.length; i++) {
+        const prev = skyline[i - 1];
+        const node = skyline[i];
+        const prevEnd = prev.x + prev.width;
+        const overlap = prevEnd - node.x;
+        if (overlap <= 0) break;
+        if (node.width > overlap) {
+          node.x += overlap;
+          node.width -= overlap;
+          break;
+        } else {
+          skyline.splice(i, 1);
+          i--;
+        }
+      }
+      // Merge nodos con misma altura
+      for (let i = 0; i < skyline.length - 1; i++) {
+        if (skyline[i].y === skyline[i + 1].y) {
+          skyline[i].width += skyline[i + 1].width;
+          skyline.splice(i + 1, 1);
+          i--;
+        }
+      }
+    };
+
+    const kerf = getKerfCm();
 
     for (const p of queue) {
-      if (p.w > sw || p.h > sh) { nextQueue.push(p); continue; }
-      if (!shelfH) {
-        if (!canStartShelf(p.h)) { nextQueue.push(p); continue; }
-        startNewShelf(p.h);
+      // footprint con kerf en los cuatro lados
+      const orientations = allowAutoRotate ? [
+        { w: p.w, h: p.h, rot: p.rot },
+        { w: p.h, h: p.w, rot: !p.rot }
+      ] : [{ w: p.w, h: p.h, rot: p.rot }];
+
+      let best = null;
+      for (const o of orientations) {
+        const wf = o.w + kerf * 2;
+        const hf = o.h + kerf * 2;
+        if (wf > usableW || hf > usableH) continue;
+        for (let i = 0; i < skyline.length; i++) {
+          const { ok, y } = fits(i, wf, hf);
+          if (!ok) continue;
+          const x = skyline[i].x;
+          if (!best || y < best.y || (y === best.y && x < best.x)) {
+            best = { i, x, y, wf, hf, o };
+          }
+        }
       }
-      if (p.h > shelfH || (curX + p.w) > sw) {
-        const newY = curY + shelfH;
-        if ((newY + p.h) > sh) { nextQueue.push(p); continue; }
-        curY = newY;
-        startNewShelf(p.h);
-      }
-      placed.push({ x: curX, y: curY, w: p.w, h: p.h, color: p.color, rowIdx: p.rowIdx, rot: p.rot });
-      curX += p.w;
+      if (!best) { nextQueue.push(p); continue; }
+      addSkylineLevel(best.i, best.x, best.y, best.wf, best.hf);
+      placed.push({ x: best.x + offX, y: best.y + offY, w: best.wf, h: best.hf, rawW: best.o.w, rawH: best.o.h, color: p.color, rowIdx: p.rowIdx, rot: best.o.rot });
     }
 
     allPlaced.push(...placed);
@@ -866,7 +1023,8 @@ function renderSheetOverview() {
 
     // Render de esta placa
     const VIEW_W = 1000;
-    const VIEW_H = Math.max(1, Math.round(VIEW_W * (sh / sw)));
+    const LABEL_EXTRA_H = 24; // espacio extra para textos al pie
+    const VIEW_H = Math.max(1, Math.round(VIEW_W * (sh / sw))) + LABEL_EXTRA_H;
     const PAD = 16;
     const innerW = VIEW_W - PAD * 2;
     const innerH = VIEW_H - PAD * 2;
@@ -909,38 +1067,74 @@ function renderSheetOverview() {
     const ox = PAD + (innerW - sw * scale) / 2;
     const oy = PAD + (innerH - sh * scale) / 2;
 
-    for (const r of placed) {
-      const rr = document.createElementNS(svgNS, 'rect');
-      rr.setAttribute('x', String(ox + r.x * scale));
-      rr.setAttribute('y', String(oy + r.y * scale));
-      rr.setAttribute('width', String(Math.max(1, r.w * scale)));
-      rr.setAttribute('height', String(Math.max(1, r.h * scale)));
-      rr.setAttribute('rx', '3');
-      rr.setAttribute('fill', r.color);
-      rr.setAttribute('fill-opacity', '0.35');
-      rr.setAttribute('stroke', r.color);
-      rr.setAttribute('stroke-width', '1.5');
-      svg.appendChild(rr);
+    // Dibujar bandas de refilado en naranja translúcido
+    const drawTrim = (x, y, w, h) => {
+      if (w <= 0 || h <= 0) return;
+      const r = document.createElementNS(svgNS, 'rect');
+      r.setAttribute('x', String(ox + x * scale));
+      r.setAttribute('y', String(oy + y * scale));
+      r.setAttribute('width', String(Math.max(1, w * scale)));
+      r.setAttribute('height', String(Math.max(1, h * scale)));
+      r.setAttribute('fill', '#f59e0b33');
+      r.setAttribute('stroke', 'none');
+      svg.appendChild(r);
+    };
+    // Compensar antialiasing: extender ligeramente hacia el borde exterior
+    const eps = 2.5 / Math.max(0.0001, scale); // ~2.5px en coordenadas placa
+    if (topT) drawTrim(0, -eps, sw, topT + eps);
+    if (bottomT) drawTrim(0, sh - bottomT, sw, bottomT + eps);
+    if (leftT) drawTrim(-eps, 0, leftT + eps, sh);
+    if (rightT) drawTrim(sw - rightT, 0, rightT + eps, sh);
 
-      const pxW = r.w * scale;
-      const pxH = r.h * scale;
+    for (const r of placed) {
+      // Dibujo del footprint (incluye kerf en 4 lados)
+      const pxX = ox + r.x * scale;
+      const pxY = oy + r.y * scale;
+      const pxW = Math.max(1, r.w * scale);
+      const pxH = Math.max(1, r.h * scale);
+      const outer = document.createElementNS(svgNS, 'rect');
+      outer.setAttribute('x', String(pxX));
+      outer.setAttribute('y', String(pxY));
+      outer.setAttribute('width', String(pxW));
+      outer.setAttribute('height', String(pxH));
+      outer.setAttribute('rx', '3');
+      outer.setAttribute('fill', '#ef444428');
+      outer.setAttribute('stroke', r.color);
+      outer.setAttribute('stroke-width', '1');
+      svg.appendChild(outer);
+
+      // Dibujo de la pieza real centrada dentro del footprint
+      const innerW = Math.max(1, r.rawW * scale);
+      const innerH = Math.max(1, r.rawH * scale);
+      const inner = document.createElementNS(svgNS, 'rect');
+      inner.setAttribute('x', String(pxX + (pxW - innerW) / 2));
+      inner.setAttribute('y', String(pxY + (pxH - innerH) / 2));
+      inner.setAttribute('width', String(innerW));
+      inner.setAttribute('height', String(innerH));
+      inner.setAttribute('rx', '2');
+      inner.setAttribute('fill', r.color);
+      inner.setAttribute('fill-opacity', '0.35');
+      inner.setAttribute('stroke', r.color);
+      inner.setAttribute('stroke-width', '1');
+      svg.appendChild(inner);
+
       if (pxW >= 40 && pxH >= 28) {
         const t = document.createElementNS(svgNS, 'text');
         t.setAttribute('class', 'piece-label');
-        const cx = ox + r.x * scale + pxW / 2;
-        const cy = oy + r.y * scale + pxH / 2;
+        const cx = pxX + pxW / 2;
+        const cy = pxY + pxH / 2;
         t.setAttribute('x', String(cx));
         t.setAttribute('y', String(cy));
         const fs = clamp(Math.min(pxW, pxH) * 0.18, 10, 16);
         t.setAttribute('font-size', String(fs));
-        t.textContent = `${r.w}×${r.h} cm`;
+        t.textContent = `${r.rawW}×${r.rawH} cm`;
         svg.appendChild(t);
       }
       if (r.rot) {
         const t = document.createElementNS(svgNS, 'text');
         t.setAttribute('class', 'piece-rot');
-        t.setAttribute('x', String(ox + r.x * scale + 4));
-        t.setAttribute('y', String(oy + r.y * scale + 12));
+        t.setAttribute('x', String(pxX + 4));
+        t.setAttribute('y', String(pxY + 12));
         t.textContent = '90°';
         svg.appendChild(t);
       }
@@ -952,7 +1146,7 @@ function renderSheetOverview() {
       warn.setAttribute('class', 'sheet-dims');
       warn.setAttribute('x', String(PAD + 8));
       // Bajar 15px el texto sin salir del viewBox
-      const yWarn = Math.min(VIEW_H - 2, VIEW_H - 8 + 15);
+      const yWarn = VIEW_H;
       warn.setAttribute('y', String(yWarn));
       warn.textContent = `No entran ${queue.length} pieza(s)`;
       svg.appendChild(warn);
@@ -976,7 +1170,7 @@ function renderSheetOverview() {
   // Actualizar resumen: piezas y área usada (solo colocadas)
   const piecesCount = allPlaced.length;
   let areaCm2 = 0;
-  for (const r of allPlaced) areaCm2 += r.w * r.h;
+  for (const r of allPlaced) areaCm2 += r.w * r.h; // footprint incluye kerf en 4 lados
   const areaM2 = areaCm2 / 10000;
   const fmt = (n) => {
     const s = n.toFixed(2).replace(/\.00$/, '');
@@ -1066,3 +1260,89 @@ if (installBtn) {
 window.addEventListener('appinstalled', () => {
   if (installBtn) installBtn.style.display = 'none';
 });
+
+// Tema claro/oscuro
+const THEME_KEY = 'cortes_theme_v1';
+const VISITS_KEY = 'cortes_visits_v1';
+function applyTheme(theme) {
+  const isLight = theme === 'light';
+  document.body.classList.toggle('theme-light', isLight);
+  if (themeToggleBtn) themeToggleBtn.textContent = isLight ? 'Modo oscuro' : 'Modo claro';
+}
+function loadTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'light' || saved === 'dark') { applyTheme(saved); return; }
+  // Usa preferencia del sistema como default
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(prefersLight ? 'light' : 'dark');
+}
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener('click', () => {
+    const isLight = document.body.classList.contains('theme-light');
+    const next = isLight ? 'dark' : 'light';
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
+    // Recolorear y redibujar
+    reindexRows();
+    recalcEdgebanding();
+    renderSheetOverview();
+    updateRowSummaryUI();
+  });
+}
+loadTheme();
+
+// --- Analytics opcional (GA4) ---
+(function initGA(){
+  const id = window.GA_MEASUREMENT_ID;
+  if (!id) return;
+  const s = document.createElement('script');
+  s.async = true; s.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;
+  document.head.appendChild(s);
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){ dataLayer.push(arguments); }
+  window.gtag = gtag;
+  gtag('js', new Date());
+  gtag('config', id);
+  gtag('event', 'visit', {
+    user_agent: navigator.userAgent,
+    platform: navigator.platform,
+    language: navigator.language
+  });
+})();
+
+// --- Registro local de visitas + panel oculto ---
+function recordVisit() {
+  const logs = JSON.parse(localStorage.getItem(VISITS_KEY) || '[]');
+  logs.push({ t: new Date().toISOString(), ua: navigator.userAgent, pf: navigator.platform });
+  localStorage.setItem(VISITS_KEY, JSON.stringify(logs.slice(-500))); // mantener últimos 500
+}
+function renderVisits() {
+  const panel = document.getElementById('adminPanel');
+  if (!panel || panel.style.display === 'none') return;
+  const logs = JSON.parse(localStorage.getItem(VISITS_KEY) || '[]');
+  const sum = document.getElementById('visitSummary');
+  if (sum) sum.textContent = `Registros locales: ${logs.length}`;
+  const tbody = document.querySelector('#visitTable tbody');
+  if (tbody) {
+    tbody.innerHTML = '';
+    logs.slice().reverse().forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="padding:4px;">${r.t}</td><td style="padding:4px;">${r.ua}</td><td style="padding:4px;">${r.pf}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+}
+function toggleAdminPanel() {
+  const panel = document.getElementById('adminPanel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  renderVisits();
+}
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'l') {
+    e.preventDefault(); toggleAdminPanel();
+  }
+});
+const clearBtn = document.getElementById('clearVisitsBtn');
+if (clearBtn) clearBtn.addEventListener('click', () => { localStorage.removeItem(VISITS_KEY); renderVisits(); });
+recordVisit();
