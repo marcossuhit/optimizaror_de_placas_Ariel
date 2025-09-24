@@ -1057,7 +1057,7 @@ function renderSheetOverview() {
       ];
 
       const candidates = orientations
-        .map((o) => ({ ...o, wf: o.w + kerf * 2, hf: o.h + kerf * 2 }))
+        .map((o) => ({ ...o, wf: o.w + kerf, hf: o.h + kerf }))
         .filter((o) => o.wf > 0 && o.hf > 0);
 
       if (!candidates.length) return null;
