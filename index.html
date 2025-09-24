@@ -35,6 +35,7 @@
           <button id="loadJsonBtn" class="btn">Cargar</button>
           <button id="exportPngBtn" class="btn">Exportar PNG</button>
           <button id="exportPdfBtn" class="btn">Exportar PDF</button>
+          <button id="resetAllBtn" class="btn">Limpiar entradas</button>
           <button id="themeToggle" class="btn">Modo claro</button>
         </div>
       </section>
@@ -54,23 +55,22 @@
             <div id="plates" class="plates"></div>
           </section>
 
+          <section id="rows" class="rows">
+            <!-- Las filas se agregan dinámicamente -->
+          </section>
+
           <section class="rows-header">
             <p class="rows-intro">
-              Complete la(s) placa(s) para habilitar filas. Ingrese hasta 15 tipos de cortes. Cada fila muestra un rectángulo con bordes clicables para marcar selección.
+              Complete la(s) placa(s) para habilitar filas. Ingrese tipos de cortes. Cada fila muestra un rectángulo con bordes clicables para marcar selección.
             </p>
             <div class="rows-controls">
               <button id="addRowBtn" class="btn primary">Agregar fila</button>
               <button id="clearAllBtn" class="btn">Limpiar todo</button>
               <span id="addRowHint" class="hint-inline"></span>
-              <span class="limit-note">Límite: 15 filas</span>
               <label class="hint-inline" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;">
                 <input id="autoRotateToggle" type="checkbox" /> Rotación automática permitida
               </label>
             </div>
-          </section>
-
-          <section id="rows" class="rows">
-            <!-- Las filas se agregan dinámicamente -->
           </section>
         </div>
 
@@ -84,7 +84,7 @@
           <div id="summaryPlaced" class="summary-stat">Colocados: 0</div>
           <div id="summaryLeft" class="summary-stat">Fuera: 0</div>
           <ul id="summaryList" class="summary-list"></ul>
-          <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 cm</div>
+          <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 mm</div>
         </aside>
       </div>
 

@@ -1,4 +1,4 @@
-const MAX_ROWS = 15;
+const MAX_ROWS = Number.MAX_SAFE_INTEGER;
 
 const rowsEl = document.getElementById('rows');
 const addRowBtn = document.getElementById('addRowBtn');
@@ -8,6 +8,7 @@ const saveJsonBtn = document.getElementById('saveJsonBtn');
 const loadJsonBtn = document.getElementById('loadJsonBtn');
 const exportPngBtn = document.getElementById('exportPngBtn');
 const exportPdfBtn = document.getElementById('exportPdfBtn');
+const resetAllBtn = document.getElementById('resetAllBtn');
 const installBtn = document.getElementById('installBtn');
 const autoRotateToggle = document.getElementById('autoRotateToggle');
 const themeToggleBtn = document.getElementById('themeToggle');
@@ -30,7 +31,7 @@ const LS_KEY = 'cortes_proyecto_v1';
 let collapsedPlates = new Set();
 
 // Estado para sincronizar resumen por fila
-let lastEdgebandByRow = new Map(); // rowIdx -> cm subtotal
+let lastEdgebandByRow = new Map(); // rowIdx -> mm subtotal
 let lastPlacementByRow = new Map(); // rowIdx -> { requested, placed, left }
 
 function updateRowSummaryUI() {
@@ -46,8 +47,8 @@ function updateRowSummaryUI() {
     dot.className = 'legend-dot';
     dot.style.background = color;
     const text = document.createElement('span');
-    const fmt = (n) => String(n.toFixed ? n.toFixed(2).replace(/\.00$/, '') : n);
-    text.textContent = `Fila ${i + 1}: ${place.placed} de ${place.requested} (fuera ${place.left}) — cubre canto: ${fmt(cc)} cm`;
+    const fmt = (n) => formatNumber(Number(n) || 0, 2);
+    text.textContent = `Fila ${i + 1}: ${place.placed} de ${place.requested} (fuera ${place.left}) — cubre canto: ${fmt(cc)} mm`;
     li.appendChild(dot);
     li.appendChild(text);
     summaryListEl.appendChild(li);
@@ -88,7 +89,6 @@ function getAddRowDisabledReason() {
   const rows = getRows();
   const count = rows.length;
   if (!isSheetComplete()) return 'Complete la(s) placa(s) para habilitar filas';
-  if (count >= MAX_ROWS) return 'Alcanzaste el límite de filas';
   if (count >= 5) {
     const firstFiveComplete = rows.slice(0, 5).every(isRowCompleteEl);
     if (!firstFiveComplete) return 'Completá las primeras 5 filas';
@@ -109,6 +109,14 @@ function toggleAddButton() {
 
 function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
+}
+
+function formatNumber(value, decimals = 2) {
+  if (!isFinite(value)) return '0';
+  return value
+    .toFixed(decimals)
+    .replace(/\.0+$/, '')
+    .replace(/(\.\d*?)0+$/, '$1');
 }
 
 function getPlates() {
@@ -138,17 +146,22 @@ function isSheetComplete() {
   return getPlates().length > 0;
 }
 
-function getKerfCm() {
+function getKerfMm() {
   const v = parseInt(kerfInput?.value ?? '0', 10);
   if (isNaN(v) || v < 0) return 0;
-  // Input en mm, convertir a cm
-  return v / 10;
+  // El input ya está en milímetros
+  return v;
 }
 
 function makeRow(index) {
   const row = document.createElement('div');
   row.className = 'row';
   row.dataset.rowIdx = String(index);
+
+  // Índice de fila
+  const fIdx = document.createElement('div');
+  fIdx.className = 'idx';
+  fIdx.textContent = String(index + 1);
 
   // Cantidad
   const fQty = document.createElement('div');
@@ -167,12 +180,12 @@ function makeRow(index) {
   const fW = document.createElement('div');
   fW.className = 'field';
   const lW = document.createElement('label');
-  lW.textContent = 'Ancho (cm)';
+  lW.textContent = 'Ancho (mm)';
   const iW = document.createElement('input');
   iW.type = 'number';
-  iW.placeholder = 'Ej: 100';
+  iW.placeholder = 'Ej: 600';
   iW.min = '0';
-  iW.step = '0.1';
+  iW.step = '1';
   fW.appendChild(lW);
   fW.appendChild(iW);
 
@@ -180,12 +193,12 @@ function makeRow(index) {
   const fH = document.createElement('div');
   fH.className = 'field';
   const lH = document.createElement('label');
-  lH.textContent = 'Alto (cm)';
+  lH.textContent = 'Alto (mm)';
   const iH = document.createElement('input');
   iH.type = 'number';
-  iH.placeholder = 'Ej: 90';
+  iH.placeholder = 'Ej: 720';
   iH.min = '0';
-  iH.step = '0.1';
+  iH.step = '1';
   fH.appendChild(lH);
   fH.appendChild(iH);
 
@@ -194,7 +207,7 @@ function makeRow(index) {
   actions.className = 'actions';
   const units = document.createElement('div');
   units.className = 'units';
-  units.textContent = 'cm';
+  units.textContent = 'mm';
   const colorDot = document.createElement('span');
   colorDot.className = 'color-dot';
   colorDot.title = 'Color de esta fila';
@@ -315,6 +328,7 @@ function makeRow(index) {
   preview.appendChild(svgWrap);
 
   // Ensamble de la fila
+  row.appendChild(fIdx);
   row.appendChild(fQty);
   row.appendChild(fW);
   row.appendChild(fH);
@@ -346,6 +360,7 @@ function makeRow(index) {
     const rot = !!iRot.checked;
     const effW = rot ? h : w;
     const effH = rot ? w : h;
+    const fmtSize = (val) => formatNumber(val, 2);
     if (enabled) {
       // Escala basada en la placa con mínimo confortable y respetando el contenedor
       const scalePlate = sheet ? Math.min(innerW / sheet.sw, innerH / sheet.sh) : 0;
@@ -358,9 +373,9 @@ function makeRow(index) {
       ry = OUTER_PAD + (innerH - rh) / 2;
       ry = Math.max(OUTER_PAD, ry - VBIAS_ENABLED);
       if (rot) {
-        dims.textContent = `${h} × ${w} cm (rotado)`;
+        dims.textContent = `${fmtSize(h)} × ${fmtSize(w)} mm (rotado)`;
       } else {
-        dims.textContent = `${w} × ${h} cm`;
+        dims.textContent = `${fmtSize(w)} × ${fmtSize(h)} mm`;
       }
     } else {
       // Al bloquear, limpiar selección de bordes
@@ -490,6 +505,8 @@ function reindexRows() {
     r.dataset.rowIdx = String(i);
     const dot = r.querySelector('.color-dot');
     if (dot) dot.style.background = getRowColor(i);
+    const idx = r.querySelector('.idx');
+    if (idx) idx.textContent = String(i + 1);
   });
 }
 
@@ -528,13 +545,13 @@ function makePlateRow() {
   row.className = 'plate-row';
 
   const fW = document.createElement('div'); fW.className = 'field';
-  const lW = document.createElement('label'); lW.textContent = 'Ancho (cm)';
-  const iW = document.createElement('input'); iW.className = 'plate-w'; iW.type = 'number'; iW.min = '0'; iW.step = '0.1'; iW.placeholder = 'Ej: 244';
+  const lW = document.createElement('label'); lW.textContent = 'Ancho (mm)';
+  const iW = document.createElement('input'); iW.className = 'plate-w'; iW.type = 'number'; iW.min = '0'; iW.step = '1'; iW.placeholder = 'Ej: 2440';
   fW.appendChild(lW); fW.appendChild(iW);
 
   const fH = document.createElement('div'); fH.className = 'field';
-  const lH = document.createElement('label'); lH.textContent = 'Alto (cm)';
-  const iH = document.createElement('input'); iH.className = 'plate-h'; iH.type = 'number'; iH.min = '0'; iH.step = '0.1'; iH.placeholder = 'Ej: 122';
+  const lH = document.createElement('label'); lH.textContent = 'Alto (mm)';
+  const iH = document.createElement('input'); iH.className = 'plate-h'; iH.type = 'number'; iH.min = '0'; iH.step = '1'; iH.placeholder = 'Ej: 1220';
   fH.appendChild(lH); fH.appendChild(iH);
 
   const fC = document.createElement('div'); fC.className = 'field';
@@ -833,11 +850,22 @@ function exportPDF() {
 
 if (exportPngBtn) exportPngBtn.addEventListener('click', exportPNG);
 if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportPDF);
+if (resetAllBtn) {
+  resetAllBtn.addEventListener('click', () => {
+    clearAllPlates();
+    clearAllRows();
+    if (projectNameEl) projectNameEl.value = '';
+    if (kerfInput) kerfInput.value = '0';
+    if (autoRotateToggle) autoRotateToggle.checked = false;
+    applyPlatesGate();
+    ensureDefaultRows();
+  });
+}
 
 // Cálculo de Cantidad de cubre canto (suma de lados seleccionados)
 function recalcEdgebanding() {
   const rows = getRows();
-  let totalCm = 0;
+  let totalMm = 0;
   const items = [];
   lastEdgebandByRow = new Map();
 
@@ -865,17 +893,14 @@ function recalcEdgebanding() {
     if (subtotal > 0) {
       items.push({ idx: idx + 1, subtotal, color: getRowColor(idx) });
       lastEdgebandByRow.set(idx, subtotal);
-      totalCm += subtotal;
+      totalMm += subtotal;
     }
   });
 
-  const fmt = (n) => {
-    const s = n.toFixed(2).replace(/\.00$/, '');
-    return s;
-  };
+  const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
   if (summaryTotalEl) {
-    const meters = totalCm / 100;
-    summaryTotalEl.textContent = `Cantidad de cubre canto: ${fmt(totalCm)} cm (${fmt(meters)} m)`;
+    const meters = totalMm / 1000;
+    summaryTotalEl.textContent = `Cantidad de cubre canto: ${fmt(totalMm, 0)} mm (${fmt(meters, 3)} m)`;
   }
   // Actualizar lista combinada (con datos de colocación)
   updateRowSummaryUI();
@@ -903,6 +928,16 @@ function renderSheetOverview() {
 
   // Preparar piezas a ubicar (shelf packing simple)
   const pieces = [];
+  const allowAutoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
+  const dimensionKey = (wVal, hVal) => {
+    const safeW = Number.isFinite(wVal) ? wVal : 0;
+    const safeH = Number.isFinite(hVal) ? hVal : 0;
+    const normW = Math.round(safeW * 1000) / 1000;
+    const normH = Math.round(safeH * 1000) / 1000;
+    const minSide = Math.min(normW, normH);
+    const maxSide = Math.max(normW, normH);
+    return `${minSide}×${maxSide}`;
+  };
   let totalRequested = 0;
   getRows().forEach((row, idx) => {
     const inputs = row.querySelectorAll('.field input');
@@ -914,120 +949,217 @@ function renderSheetOverview() {
     const rot = row._getRotation ? row._getRotation() : false;
     const rawW = rot ? h : w;
     const rawH = rot ? w : h;
-    const kerf = getKerfCm();
+    const area = rawW * rawH;
+    const key = dimensionKey(rawW, rawH);
+    const baseIndex = pieces.length;
     for (let i = 0; i < qty; i++) {
-      pieces.push({ rowIdx: idx, w: rawW, h: rawH, rawW, rawH, color: getRowColor(idx), rot, kerf });
+      pieces.push({
+        rowIdx: idx,
+        w: rawW,
+        h: rawH,
+        rawW,
+        rawH,
+        color: getRowColor(idx),
+        rot,
+        area,
+        dimKey: key,
+        originalIndex: baseIndex + i
+      });
     }
     totalRequested += qty;
   });
-
-  // Ordenar piezas por alto desc para ayudar al Skyline (heurística)
-  pieces.sort((a, b) => b.h - a.h || b.w - a.w);
+  // Agrupar piezas por dimensiones y ordenarlas por área (prioriza piezas grandes)
+  const groupsMap = new Map();
+  pieces.forEach((piece) => {
+    if (!groupsMap.has(piece.dimKey)) {
+      groupsMap.set(piece.dimKey, { key: piece.dimKey, area: piece.area, maxSide: Math.max(piece.w, piece.h), pieces: [] });
+    }
+    const group = groupsMap.get(piece.dimKey);
+    group.area = Math.max(group.area, piece.area);
+    group.maxSide = Math.max(group.maxSide, Math.max(piece.w, piece.h));
+    group.pieces.push(piece);
+  });
+  const groups = Array.from(groupsMap.values());
+  groups.sort((a, b) => {
+    if (b.area !== a.area) return b.area - a.area;
+    if (b.maxSide !== a.maxSide) return b.maxSide - a.maxSide;
+    return a.key.localeCompare(b.key);
+  });
+  groups.forEach((group) => {
+    group.pieces.sort((a, b) => {
+      if (b.area !== a.area) return b.area - a.area;
+      return a.originalIndex - b.originalIndex;
+    });
+  });
 
   const allPlaced = [];
-  let queue = pieces.slice();
-  const allowAutoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
+  let groupQueues = groups.map((group) => ({
+    key: group.key,
+    area: group.area,
+    maxSide: group.maxSide,
+    area: group.area,
+    pieces: group.pieces.slice()
+  }));
 
   for (let plateIdx = 0; plateIdx < instances.length; plateIdx++) {
+    if (!groupQueues.length) break;
     const { sw, sh, trim } = instances[plateIdx];
-    // Refilado (mm -> cm)
-    const tcm = Math.max(0, ((trim && trim.mm) || 0) / 10);
-    const leftT = trim && trim.left ? tcm : 0;
-    const rightT = trim && trim.right ? tcm : 0;
-    const topT = trim && trim.top ? tcm : 0;
-    const bottomT = trim && trim.bottom ? tcm : 0;
+    // Refilado en milímetros
+    const trimValue = Math.max(0, (trim && trim.mm) || 0);
+    const leftT = trim && trim.left ? trimValue : 0;
+    const rightT = trim && trim.right ? trimValue : 0;
+    const topT = trim && trim.top ? trimValue : 0;
+    const bottomT = trim && trim.bottom ? trimValue : 0;
     const usableW = Math.max(0, sw - leftT - rightT);
     const usableH = Math.max(0, sh - topT - bottomT);
     const offX = leftT;
     const offY = topT;
 
-    // Skyline-BL (sin rotación, sin kerf en los bordes; kerf entre piezas opcional en futuro)
+    const kerf = getKerfMm();
     const placed = [];
-    const nextQueue = [];
-    const skyline = [{ x: 0, y: 0, width: usableW }];
+    const EPS = 0.0001;
 
-    const fits = (index, w, h) => {
-      let x = skyline[index].x;
-      if (x + w > usableW) return { ok: false };
-      let widthLeft = w;
-      let j = index;
-      let topY = 0;
-      while (widthLeft > 0) {
-        if (j >= skyline.length) return { ok: false };
-        topY = Math.max(topY, skyline[j].y);
-        if (topY + h > usableH) return { ok: false };
-        widthLeft -= skyline[j].width;
-        j++;
+    let freeRects = [{ x: 0, y: 0, w: usableW, h: usableH }];
+
+    const cleanupFreeRects = () => {
+      const pruned = [];
+      for (let i = 0; i < freeRects.length; i++) {
+        const a = freeRects[i];
+        let contained = false;
+        for (let j = 0; j < freeRects.length; j++) {
+          if (i === j) continue;
+          const b = freeRects[j];
+          if (a.x >= b.x - EPS && a.y >= b.y - EPS &&
+              a.x + a.w <= b.x + b.w + EPS &&
+              a.y + a.h <= b.y + b.h + EPS) {
+            contained = true;
+            break;
+          }
+        }
+        if (!contained) pruned.push(a);
       }
-      return { ok: true, y: topY };
+      freeRects = pruned;
     };
 
-    const addSkylineLevel = (index, x, y, w, h) => {
-      skyline.splice(index, 0, { x, y: y + h, width: w });
-      // Ajustar solapes
-      for (let i = index + 1; i < skyline.length; i++) {
-        const prev = skyline[i - 1];
-        const node = skyline[i];
-        const prevEnd = prev.x + prev.width;
-        const overlap = prevEnd - node.x;
-        if (overlap <= 0) break;
-        if (node.width > overlap) {
-          node.x += overlap;
-          node.width -= overlap;
-          break;
-        } else {
-          skyline.splice(i, 1);
-          i--;
-        }
+    const splitFreeRect = (optionRects) => {
+      for (const r of optionRects) {
+        if (r.w < EPS || r.h < EPS) continue;
+        freeRects.push(r);
       }
-      // Merge nodos con misma altura
-      for (let i = 0; i < skyline.length - 1; i++) {
-        if (skyline[i].y === skyline[i + 1].y) {
-          skyline[i].width += skyline[i + 1].width;
-          skyline.splice(i + 1, 1);
-          i--;
-        }
-      }
+      cleanupFreeRects();
     };
 
-    const kerf = getKerfCm();
+    const placePiece = (piece) => {
+      if (!freeRects.length) return null;
+      const orientations = [
+        { w: piece.w, h: piece.h, rot: piece.rot },
+        { w: piece.h, h: piece.w, rot: !piece.rot }
+      ];
 
-    for (const p of queue) {
-      // footprint con kerf en los cuatro lados
-      const orientations = allowAutoRotate ? [
-        { w: p.w, h: p.h, rot: p.rot },
-        { w: p.h, h: p.w, rot: !p.rot }
-      ] : [{ w: p.w, h: p.h, rot: p.rot }];
+      const candidates = orientations
+        .map((o) => ({ ...o, wf: o.w + kerf * 2, hf: o.h + kerf * 2 }))
+        .filter((o) => o.wf > 0 && o.hf > 0);
+
+      if (!candidates.length) return null;
 
       let best = null;
-      for (const o of orientations) {
-        const wf = o.w + kerf * 2;
-        const hf = o.h + kerf * 2;
-        if (wf > usableW || hf > usableH) continue;
-        for (let i = 0; i < skyline.length; i++) {
-          const { ok, y } = fits(i, wf, hf);
-          if (!ok) continue;
-          const x = skyline[i].x;
-          if (!best || y < best.y || (y === best.y && x < best.x)) {
-            best = { i, x, y, wf, hf, o };
+      for (let rIdx = 0; rIdx < freeRects.length; rIdx++) {
+        const rect = freeRects[rIdx];
+        for (const o of candidates) {
+          if (o.wf > rect.w + EPS || o.hf > rect.h + EPS) continue;
+          const leftoverX = Math.max(0, rect.w - o.wf);
+          const leftoverY = Math.max(0, rect.h - o.hf);
+          const hSplit = [];
+          if (leftoverY > EPS) hSplit.push({ x: rect.x, y: rect.y + o.hf, w: rect.w, h: leftoverY });
+          if (leftoverX > EPS) hSplit.push({ x: rect.x + o.wf, y: rect.y, w: leftoverX, h: o.hf });
+          const vSplit = [];
+          if (leftoverX > EPS) vSplit.push({ x: rect.x + o.wf, y: rect.y, w: leftoverX, h: rect.h });
+          if (leftoverY > EPS) vSplit.push({ x: rect.x, y: rect.y + o.hf, w: o.wf, h: leftoverY });
+          const options = [
+            { rects: hSplit, waste: hSplit.reduce((acc, r) => acc + r.w * r.h, 0) },
+            { rects: vSplit, waste: vSplit.reduce((acc, r) => acc + r.w * r.h, 0) }
+          ];
+          if (!options[0].rects.length && !options[1].rects.length) options.push({ rects: [], waste: 0 });
+          for (const opt of options) {
+            const score = opt.waste;
+            if (!best || score < best.score ||
+                (Math.abs(score - best.score) <= EPS && (rect.y < best.rect.y - EPS ||
+                (Math.abs(rect.y - best.rect.y) <= EPS && rect.x < best.rect.x - EPS)))) {
+              best = { rectIdx: rIdx, rect, orientation: o, score, optionRects: opt.rects };
+            }
           }
         }
       }
-      if (!best) { nextQueue.push(p); continue; }
-      addSkylineLevel(best.i, best.x, best.y, best.wf, best.hf);
-      placed.push({ x: best.x + offX, y: best.y + offY, w: best.wf, h: best.hf, rawW: best.o.w, rawH: best.o.h, color: p.color, rowIdx: p.rowIdx, rot: best.o.rot });
+
+      if (!best) return null;
+
+      const rect = freeRects.splice(best.rectIdx, 1)[0];
+      const placedRect = {
+        x: rect.x,
+        y: rect.y,
+        w: best.orientation.wf,
+        h: best.orientation.hf,
+        rawW: best.orientation.w,
+        rawH: best.orientation.h,
+        rot: best.orientation.rot
+      };
+
+      splitFreeRect(best.optionRects || []);
+      return placedRect;
+    };
+
+    let pendingGroups = groupQueues.slice();
+    let madeProgress = true;
+    while (madeProgress && pendingGroups.length) {
+      madeProgress = false;
+      const nextGroupQueues = [];
+      for (const entry of pendingGroups) {
+        const piecesList = entry.pieces.slice();
+        const remaining = [];
+        let placedCount = 0;
+        for (let i = 0; i < piecesList.length; i++) {
+          const piece = piecesList[i];
+          const placement = placePiece(piece);
+          if (!placement) {
+            remaining.push(...piecesList.slice(i));
+            break;
+          }
+          placed.push({
+            x: placement.x + offX,
+            y: placement.y + offY,
+            w: placement.w,
+            h: placement.h,
+            rawW: placement.rawW,
+            rawH: placement.rawH,
+            color: piece.color,
+            rowIdx: piece.rowIdx,
+            rot: placement.rot
+          });
+          placedCount++;
+        }
+        if (remaining.length) nextGroupQueues.push({ ...entry, pieces: remaining });
+        if (placedCount > 0) madeProgress = true;
+      }
+      pendingGroups = nextGroupQueues.sort((a, b) => {
+        if (b.area !== a.area) return b.area - a.area;
+        if (b.maxSide !== a.maxSide) return b.maxSide - a.maxSide;
+        return a.key.localeCompare(b.key);
+      });
     }
 
     allPlaced.push(...placed);
-    queue = nextQueue;
+    groupQueues = pendingGroups;
 
     // Render de esta placa
     const VIEW_W = 1000;
-    const LABEL_EXTRA_H = 24; // espacio extra para textos al pie
-    const VIEW_H = Math.max(1, Math.round(VIEW_W * (sh / sw))) + LABEL_EXTRA_H;
-    const PAD = 16;
-    const innerW = VIEW_W - PAD * 2;
-    const innerH = VIEW_H - PAD * 2;
+    const LABEL_EXTRA_H = 24; // espacio extra para textos por encima de la placa
+    const PAD_X = 16;
+    const PAD_BOTTOM = 16;
+    const PAD_TOP = PAD_BOTTOM + LABEL_EXTRA_H;
+    const innerW = VIEW_W - PAD_X * 2;
+    const scale = innerW / sw;
+    const contentH = sh * scale;
+    const VIEW_H = Math.max(1, Math.round(contentH + PAD_TOP + PAD_BOTTOM));
 
     const wrap = document.createElement('div');
     const title = document.createElement('div');
@@ -1048,26 +1180,44 @@ function renderSheetOverview() {
 
     const rect = document.createElementNS(svgNS, 'rect');
     rect.setAttribute('class', 'sheet-outline');
-    rect.setAttribute('x', String(PAD));
-    rect.setAttribute('y', String(PAD));
+    rect.setAttribute('x', String(PAD_X));
+    rect.setAttribute('y', String(PAD_TOP));
     rect.setAttribute('width', String(innerW));
-    rect.setAttribute('height', String(innerH));
+    rect.setAttribute('height', String(contentH));
     rect.setAttribute('rx', '6');
     svg.appendChild(rect);
 
     const label = document.createElementNS(svgNS, 'text');
     label.setAttribute('class', 'sheet-dims');
     label.setAttribute('x', String(VIEW_W / 2));
-    label.setAttribute('y', String(PAD + 20));
+    label.setAttribute('y', String(PAD_TOP - LABEL_EXTRA_H + 20));
     label.setAttribute('text-anchor', 'middle');
-    label.textContent = `${sw} × ${sh} cm`;
+    label.textContent = `${formatNumber(sw, 0)} × ${formatNumber(sh, 0)} mm`;
     svg.appendChild(label);
 
-    const scale = Math.min(innerW / sw, innerH / sh);
-    const ox = PAD + (innerW - sw * scale) / 2;
-    const oy = PAD + (innerH - sh * scale) / 2;
+    const ox = PAD_X;
+    const oy = PAD_TOP;
 
-    // Dibujar bandas de refilado en naranja translúcido
+    // Preparar patrón de hachurado para zonas sin uso (se aplicará con máscara)
+    const defs = document.createElementNS(svgNS, 'defs');
+    const pattern = document.createElementNS(svgNS, 'pattern');
+    const patId = `hatch-${plateIdx}`;
+    pattern.setAttribute('id', patId);
+    pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+    pattern.setAttribute('width', '10');
+    pattern.setAttribute('height', '10');
+    const line = document.createElementNS(svgNS, 'path');
+    line.setAttribute('d', 'M0 10 L10 0');
+    const isLightTheme = document.body.classList.contains('theme-light');
+    line.setAttribute('stroke', isLightTheme ? '#64748b26' : '#94a3b822');
+    line.setAttribute('stroke-width', '1');
+    pattern.appendChild(line);
+    defs.appendChild(pattern);
+    svg.appendChild(defs);
+    // Acumulador de áreas ocupadas (trim + footprints de piezas) para enmascarar
+    const occupied = [];
+
+    // Dibujar bandas de refilado en naranja translúcido (cubren el hachurado)
     const drawTrim = (x, y, w, h) => {
       if (w <= 0 || h <= 0) return;
       const r = document.createElementNS(svgNS, 'rect');
@@ -1081,10 +1231,10 @@ function renderSheetOverview() {
     };
     // Compensar antialiasing: extender ligeramente hacia el borde exterior
     const eps = 2.5 / Math.max(0.0001, scale); // ~2.5px en coordenadas placa
-    if (topT) drawTrim(0, -eps, sw, topT + eps);
-    if (bottomT) drawTrim(0, sh - bottomT, sw, bottomT + eps);
-    if (leftT) drawTrim(-eps, 0, leftT + eps, sh);
-    if (rightT) drawTrim(sw - rightT, 0, rightT + eps, sh);
+    if (topT) { drawTrim(0, -eps, sw, topT + eps); occupied.push({ x: 0, y: -eps, w: sw, h: topT + eps }); }
+    if (bottomT) { drawTrim(0, sh - bottomT, sw, bottomT + eps); occupied.push({ x: 0, y: sh - bottomT, w: sw, h: bottomT + eps }); }
+    if (leftT) { drawTrim(-eps, 0, leftT + eps, sh); occupied.push({ x: -eps, y: 0, w: leftT + eps, h: sh }); }
+    if (rightT) { drawTrim(sw - rightT, 0, rightT + eps, sh); occupied.push({ x: sw - rightT, y: 0, w: rightT + eps, h: sh }); }
 
     for (const r of placed) {
       // Dibujo del footprint (incluye kerf en 4 lados)
@@ -1102,6 +1252,8 @@ function renderSheetOverview() {
       outer.setAttribute('stroke', r.color);
       outer.setAttribute('stroke-width', '1');
       svg.appendChild(outer);
+      // Registrar footprint como ocupado para la máscara de hachurado
+      occupied.push({ x: r.x, y: r.y, w: r.w, h: r.h });
 
       // Dibujo de la pieza real centrada dentro del footprint
       const innerW = Math.max(1, r.rawW * scale);
@@ -1127,7 +1279,7 @@ function renderSheetOverview() {
         t.setAttribute('y', String(cy));
         const fs = clamp(Math.min(pxW, pxH) * 0.18, 10, 16);
         t.setAttribute('font-size', String(fs));
-        t.textContent = `${r.rawW}×${r.rawH} cm`;
+        t.textContent = `${formatNumber(r.rawW, 0)}×${formatNumber(r.rawH, 0)} mm`;
         svg.appendChild(t);
       }
       if (r.rot) {
@@ -1140,15 +1292,49 @@ function renderSheetOverview() {
       }
     }
 
+    // Aplicar hachurado SOLO en zonas sin uso usando máscara
+    const mask = document.createElementNS(svgNS, 'mask');
+    const maskId = `occ-mask-${plateIdx}`;
+    mask.setAttribute('id', maskId);
+    const baseWhite = document.createElementNS(svgNS, 'rect');
+    baseWhite.setAttribute('x', String(ox));
+    baseWhite.setAttribute('y', String(oy));
+    baseWhite.setAttribute('width', String(sw * scale));
+    baseWhite.setAttribute('height', String(sh * scale));
+    baseWhite.setAttribute('fill', 'white');
+    mask.appendChild(baseWhite);
+    // Pintar de negro zonas ocupadas (se recortan del hachurado)
+    for (const o of occupied) {
+      const rOcc = document.createElementNS(svgNS, 'rect');
+      rOcc.setAttribute('x', String(ox + o.x * scale));
+      rOcc.setAttribute('y', String(oy + o.y * scale));
+      rOcc.setAttribute('width', String(Math.max(0, o.w * scale)));
+      rOcc.setAttribute('height', String(Math.max(0, o.h * scale)));
+      rOcc.setAttribute('fill', 'black');
+      mask.appendChild(rOcc);
+    }
+    defs.appendChild(mask);
+    const hatchRect = document.createElementNS(svgNS, 'rect');
+    hatchRect.setAttribute('x', String(ox));
+    hatchRect.setAttribute('y', String(oy));
+    hatchRect.setAttribute('width', String(sw * scale));
+    hatchRect.setAttribute('height', String(sh * scale));
+    hatchRect.setAttribute('fill', `url(#${patId})`);
+    hatchRect.setAttribute('mask', `url(#${maskId})`);
+    hatchRect.setAttribute('stroke', 'none');
+    // Insertar hachurado al fondo del contenido de la placa (después de defs y marco)
+    svg.insertBefore(hatchRect, label.nextSibling);
+
     // Si quedan piezas sin ubicar y es la última placa, indicarlo
-    if (plateIdx === instances.length - 1 && queue.length) {
+    const remainingPieces = groupQueues.reduce((sum, entry) => sum + entry.pieces.length, 0);
+    if (plateIdx === instances.length - 1 && remainingPieces > 0) {
       const warn = document.createElementNS(svgNS, 'text');
       warn.setAttribute('class', 'sheet-dims');
-      warn.setAttribute('x', String(PAD + 8));
-      // Bajar 15px el texto sin salir del viewBox
-      const yWarn = VIEW_H;
+      warn.setAttribute('x', String(PAD_X + 8));
+      // Ubicar el texto justo antes del borde inferior visible
+      const yWarn = VIEW_H - 6;
       warn.setAttribute('y', String(yWarn));
-      warn.textContent = `No entran ${queue.length} pieza(s)`;
+      warn.textContent = `No entran ${remainingPieces} pieza(s)`;
       svg.appendChild(warn);
     }
 
@@ -1169,26 +1355,23 @@ function renderSheetOverview() {
 
   // Actualizar resumen: piezas y área usada (solo colocadas)
   const piecesCount = allPlaced.length;
-  let areaCm2 = 0;
-  for (const r of allPlaced) areaCm2 += r.w * r.h; // footprint incluye kerf en 4 lados
-  const areaM2 = areaCm2 / 10000;
-  const fmt = (n) => {
-    const s = n.toFixed(2).replace(/\.00$/, '');
-    return s;
-  };
+  let areaMm2 = 0;
+  for (const r of allPlaced) areaMm2 += r.w * r.h; // footprint incluye kerf en 4 lados
+  const areaM2 = areaMm2 / 1e6;
+  const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
   if (summaryPiecesEl) summaryPiecesEl.textContent = `Piezas colocadas: ${piecesCount}`;
   if (summaryReqEl) summaryReqEl.textContent = `Cortes pedidos: ${totalRequested}`;
   if (summaryPlacedEl) summaryPlacedEl.textContent = `Colocados: ${piecesCount}`;
   if (summaryLeftEl) summaryLeftEl.textContent = `Fuera: ${Math.max(0, totalRequested - piecesCount)}`;
-  if (summaryAreaEl) summaryAreaEl.textContent = `Área utilizada: ${fmt(areaM2)} m²`;
+  if (summaryAreaEl) summaryAreaEl.textContent = `Área utilizada: ${fmt(areaM2, 2)} m²`;
   if (summaryUtilEl) {
-    const plateM2 = instances.reduce((acc, p) => acc + (p.sw * p.sh) / 10000, 0);
+    const plateM2 = instances.reduce((acc, p) => acc + (p.sw * p.sh) / 1e6, 0);
     const pct = plateM2 > 0 ? Math.min(100, Math.max(0, (areaM2 / plateM2) * 100)) : 0;
-    summaryUtilEl.textContent = `Aprovechamiento: ${fmt(pct)}%`;
+    summaryUtilEl.textContent = `Aprovechamiento: ${fmt(pct, 2)}%`;
     if (summaryWasteEl) {
       const wasteM2 = Math.max(0, plateM2 - areaM2);
       const wastePct = plateM2 > 0 ? Math.min(100, Math.max(0, 100 - pct)) : 0;
-      summaryWasteEl.textContent = `Desperdicio: ${fmt(wasteM2)} m² (${fmt(wastePct)}%)`;
+      summaryWasteEl.textContent = `Desperdicio: ${fmt(wasteM2, 2)} m² (${fmt(wastePct, 2)}%)`;
     }
   }
 
