@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Backoffice de Stock</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="stock-body">
+    <main class="stock-container">
+      <header class="stock-header">
+        <h1>Backoffice de Stock</h1>
+        <a href="#" id="closeWindowBtn" class="btn">Volver al planificador</a>
+      </header>
+
+      <section class="stock-panel">
+        <h2>Agregar placa al stock</h2>
+        <form id="stockForm" class="stock-form">
+          <label>
+            Material / placa
+            <input id="stockMaterialInput" type="text" placeholder="Ej: MDF Blanco" required />
+          </label>
+          <label>
+            Cantidad disponible
+            <input id="stockQtyInput" type="number" min="0" step="1" value="0" required />
+          </label>
+          <div class="stock-form-actions">
+            <button type="submit" class="btn primary">Guardar en stock</button>
+            <button type="button" id="deleteMaterialBtn" class="btn danger">Eliminar material</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="stock-panel">
+        <h2>Listado actual</h2>
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th>Cantidad</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="stockTableBody"></tbody>
+        </table>
+        <div class="stock-actions">
+          <button id="downloadStockBtn" class="btn">Descargar stock.txt</button>
+          <label class="btn btn-secondary" for="importStockInput">Importar stock.txt</label>
+          <input id="importStockInput" type="file" accept="text/plain" style="display:none" />
+          <button id="clearStockBtn" class="btn danger">Vaciar stock</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="stock.js"></script>
+  </body>
+</html>

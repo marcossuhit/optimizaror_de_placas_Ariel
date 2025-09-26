@@ -1,0 +1,2 @@
+# Formato: material|cantidad
+MDF Blanco|0

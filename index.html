@@ -33,9 +33,9 @@
           <button id="installBtn" class="btn" style="display:none">Instalar app</button>
           <button id="saveJsonBtn" class="btn">Guardar</button>
           <button id="loadJsonBtn" class="btn">Cargar</button>
-          <button id="exportPngBtn" class="btn">Exportar PNG</button>
           <button id="exportPdfBtn" class="btn">Exportar PDF</button>
           <button id="resetAllBtn" class="btn">Limpiar entradas</button>
+          <button id="manageStockBtn" class="btn">Backoffice stock</button>
           <button id="themeToggle" class="btn">Modo claro</button>
         </div>
       </section>
@@ -46,6 +46,12 @@
             <h2 class="sheet-title">Placas</h2>
             <div class="plates-controls">
               <button id="addPlateBtn" class="btn">Agregar placa</button>
+              <label class="plate-material">
+                <span>Material</span>
+                <select id="plateMaterialSelect">
+                  <option value="MDF Blanco" selected>MDF Blanco</option>
+                </select>
+              </label>
               <span class="limit-note">Agrega una o más placas (ancho, alto, cantidad)</span>
               <div class="field kerf-field">
                 <label for="kerfInput">Desp. de Sierra (mm)</label>
@@ -68,7 +74,7 @@
               <button id="clearAllBtn" class="btn">Limpiar todo</button>
               <span id="addRowHint" class="hint-inline"></span>
               <label class="hint-inline" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;">
-                <input id="autoRotateToggle" type="checkbox" /> Rotación automática permitida
+                <input id="autoRotateToggle" type="checkbox" checked /> Rotación automática permitida
               </label>
             </div>
           </section>
@@ -83,6 +89,7 @@
           <div id="summaryReq" class="summary-stat">Cortes pedidos: 0</div>
           <div id="summaryPlaced" class="summary-stat">Colocados: 0</div>
           <div id="summaryLeft" class="summary-stat">Fuera: 0</div>
+          <h3 class="summary-subtitle">Filas</h3>
           <ul id="summaryList" class="summary-list"></ul>
           <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 mm</div>
         </aside>
