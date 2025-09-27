@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Procesando acceso…</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-wrapper">
+      <div class="login-header">
+        <h1>Optimizador de Placas</h1>
+        <p>Procesando autenticación con Google…</p>
+      </div>
+    </main>
+    <script src="auth.js"></script>
+    <script>
+      (function handleCallback() {
+        const hash = window.location.hash.startsWith('#') ? window.location.hash.substring(1) : window.location.search.substring(1);
+        const params = new URLSearchParams(hash);
+        const idToken = params.get('id_token');
+        const accessToken = params.get('access_token');
+        const state = params.get('state');
+        if (!idToken) {
+          alert('No se recibió el token de Google. Intentá iniciar sesión nuevamente.');
+          window.location.replace('login.html');
+          return;
+        }
+        const payload = window.Auth.decodeJwt(idToken);
+        if (!payload || !payload.email) {
+          alert('No se pudo validar la cuenta de Google.');
+          window.location.replace('login.html');
+          return;
+        }
+        let storedNonce = null;
+        try {
+          storedNonce = localStorage.getItem(window.Auth?.OAUTH_NONCE_KEY || 'oauth_nonce_v1');
+        } catch (_) {}
+        if (storedNonce && payload.nonce !== storedNonce) {
+          alert('La respuesta de Google no pudo validarse. Intentá iniciar sesión nuevamente.');
+          window.location.replace('login.html');
+          return;
+        }
+        try {
+          localStorage.removeItem(window.Auth?.OAUTH_NONCE_KEY || 'oauth_nonce_v1');
+        } catch (_) {}
+        const user = {
+          email: payload.email,
+          name: payload.name || payload.email,
+          picture: payload.picture || '',
+          idToken,
+          accessToken,
+          state,
+          fetchedAt: Date.now()
+        };
+        window.Auth.storeAuthUser(user);
+        let redirect = 'index.html';
+        try {
+          const stored = localStorage.getItem('post_login_redirect_v1');
+          if (stored) redirect = stored;
+          localStorage.removeItem('post_login_redirect_v1');
+        } catch (_) {}
+        window.location.replace(redirect);
+      })();
+    </script>
+  </body>
+</html>

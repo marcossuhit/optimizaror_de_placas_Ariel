@@ -20,7 +20,17 @@
   </head>
   <body>
     <header class="app-header">
-      <h1>Planificador de Cortes para Carpintería</h1>
+      <div class="header-main">
+        <h1>Planificador de Cortes para Carpintería</h1>
+      </div>
+      <div class="user-session" id="userSession" style="display:none;">
+        <div class="user-avatar" id="userAvatar"></div>
+        <div class="user-meta">
+          <span class="user-greeting" id="userGreeting"></span>
+          <span class="user-email" id="userEmail"></span>
+        </div>
+        <button id="signOutBtn" class="btn ghost-btn" type="button">Cerrar sesión</button>
+      </div>
     </header>
 
     <main class="container">
@@ -34,6 +44,7 @@
           <button id="saveJsonBtn" class="btn">Guardar</button>
           <button id="loadJsonBtn" class="btn">Cargar</button>
           <button id="exportPdfBtn" class="btn">Exportar PDF</button>
+          <button id="sendCutsBtn" class="btn primary">Enviar cortes</button>
           <button id="resetAllBtn" class="btn">Limpiar entradas</button>
           <button id="manageStockBtn" class="btn">Backoffice stock</button>
           <button id="themeToggle" class="btn">Modo claro</button>
@@ -126,6 +137,7 @@
 
     
 
+    <script src="auth.js"></script>
     <script src="app.js"></script>
   </body>
   </html>

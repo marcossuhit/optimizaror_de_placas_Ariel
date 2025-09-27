@@ -27,6 +27,13 @@ const summaryUtilEl = document.getElementById('summaryUtil');
 const summaryReqEl = document.getElementById('summaryReq');
 const summaryPlacedEl = document.getElementById('summaryPlaced');
 const summaryLeftEl = document.getElementById('summaryLeft');
+const userSessionEl = document.getElementById('userSession');
+const userGreetingEl = document.getElementById('userGreeting');
+const userEmailEl = document.getElementById('userEmail');
+const userAvatarEl = document.getElementById('userAvatar');
+const signOutBtn = document.getElementById('signOutBtn');
+const sendCutsBtn = document.getElementById('sendCutsBtn');
+const sendCutsDefaultLabel = sendCutsBtn?.textContent || 'Enviar cortes';
 
 const LS_KEY = 'cortes_proyecto_v1';
 const DEFAULT_MATERIAL = 'MDF Blanco';
@@ -44,6 +51,47 @@ try {
 }
 const STOCK_STORAGE_KEY = 'stock_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
+
+const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
+
+if (signOutBtn) {
+  signOutBtn.addEventListener('click', () => {
+    if (window.Auth?.signOut) {
+      window.Auth.signOut();
+    }
+  });
+}
+
+if (userSessionEl) {
+  if (authUser) {
+    const name = (authUser.name || '').trim();
+    const firstName = name ? name.split(' ')[0] : '';
+    if (userGreetingEl) {
+      userGreetingEl.textContent = firstName ? `Hola, ${firstName}` : 'Sesión iniciada';
+    }
+    if (userEmailEl) {
+      userEmailEl.textContent = authUser.email || '';
+      userEmailEl.style.display = authUser.email ? 'block' : 'none';
+    }
+    if (userAvatarEl) {
+      if (authUser.picture) {
+        userAvatarEl.style.backgroundImage = `url(${authUser.picture})`;
+        userAvatarEl.style.backgroundSize = 'cover';
+        userAvatarEl.style.backgroundPosition = 'center';
+        userAvatarEl.textContent = '';
+      } else {
+        const initials = name
+          ? name.split(' ').filter(Boolean).map(part => part[0]).join('').slice(0, 2)
+          : (authUser.email || '?').charAt(0);
+        userAvatarEl.style.backgroundImage = '';
+        userAvatarEl.textContent = initials.toUpperCase();
+      }
+    }
+    userSessionEl.style.display = 'flex';
+  } else {
+    userSessionEl.style.display = 'none';
+  }
+}
 
 function updateRowSummaryUI() {
   if (!summaryListEl) return;
@@ -1650,6 +1698,12 @@ function download(filename, dataUrl) {
   a.remove();
 }
 
+function triggerBlobDownload(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  download(filename, url);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 function saveJSON() {
   const state = serializeState();
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1873,6 +1927,97 @@ if (manageStockBtn) {
 if (projectNameEl) projectNameEl.addEventListener('input', () => { persistState(); });
 
 // -------- Exportar PNG/PDF --------
+async function buildExportCanvasForPdf() {
+  const svgs = document.querySelectorAll('#sheetCanvas svg');
+  if (!svgs.length) {
+    alert('No hay placas para exportar');
+    return null;
+  }
+  const margin = 20;
+  const targetW = 1200;
+  const images = await Promise.all(Array.from(svgs).map(svg => new Promise((resolve) => {
+    const svg64 = svgDataUrlForExport(svg);
+    const img = new Image();
+    img.onload = () => resolve({ img, w: img.width, h: img.height });
+    img.src = svg64;
+  })));
+  const scaled = images.map(({ img, w, h }) => ({ img, w: targetW, h: Math.round(h * (targetW / w)) }));
+
+  const summaryTexts = [];
+  const addSummary = (text) => {
+    const trimmed = (text || '').trim();
+    if (trimmed) summaryTexts.push(trimmed);
+  };
+  addSummary(currentMaterialName ? `Material: ${currentMaterialName}` : '');
+  addSummary(summaryPiecesEl?.textContent);
+  addSummary(summaryReqEl?.textContent);
+  addSummary(summaryPlacedEl?.textContent);
+  addSummary(summaryLeftEl?.textContent);
+  addSummary(summaryAreaEl?.textContent);
+  addSummary(summaryWasteEl?.textContent);
+  addSummary(summaryUtilEl?.textContent);
+  addSummary(summaryTotalEl?.textContent);
+
+  const rowSummaries = Array.from(summaryListEl?.querySelectorAll('li span:last-child') || [])
+    .map((span) => span.textContent?.trim())
+    .filter(Boolean);
+
+  const summaryLineHeight = 20;
+  const headingHeight = 20;
+  const columnGap = 40;
+  const contentGap = 6;
+  const summaryStartY = margin + 44;
+  const leftBottom = summaryTexts.length
+    ? summaryStartY + headingHeight + contentGap + summaryTexts.length * summaryLineHeight
+    : summaryStartY + headingHeight;
+  const rightBottom = rowSummaries.length
+    ? summaryStartY + headingHeight + contentGap + rowSummaries.length * summaryLineHeight
+    : summaryStartY + headingHeight;
+  const summaryBlockBottom = Math.max(leftBottom, rightBottom);
+  const headerH = Math.max(120, summaryBlockBottom + margin);
+
+  const totalH = headerH + margin + scaled.reduce((acc, s) => acc + s.h + margin, 0);
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW + margin * 2;
+  canvas.height = totalH;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#111827';
+  ctx.font = 'bold 20px system-ui';
+  const projectName = (projectNameEl?.value || '').trim();
+  const title = projectName || 'Plano de cortes';
+  ctx.fillText(title, margin, 34);
+
+  const columnWidth = (targetW - margin * 2 - columnGap) / 2;
+  const leftX = margin;
+  const rightX = margin + columnWidth + columnGap;
+  const headingYOffset = summaryStartY;
+  const bodyStartY = headingYOffset + headingHeight + contentGap;
+
+  ctx.font = 'bold 16px system-ui';
+  ctx.fillText('Resumen', leftX, headingYOffset);
+  ctx.fillText('Filas', rightX, headingYOffset);
+
+  ctx.font = '16px system-ui';
+  summaryTexts.forEach((line, idx) => {
+    ctx.fillText(line, leftX, bodyStartY + idx * summaryLineHeight);
+  });
+  rowSummaries.forEach((line, idx) => {
+    ctx.fillText(line, rightX, bodyStartY + idx * summaryLineHeight);
+  });
+  let y = headerH;
+  scaled.forEach(({ img, w, h }, idx) => {
+    ctx.fillStyle = '#111827';
+    ctx.font = '14px system-ui';
+    ctx.fillText(`Placa ${idx + 1}`, margin, y - 6);
+    ctx.drawImage(img, margin, y, w, h);
+    y += h + margin;
+  });
+
+  return { canvas, title, projectName };
+}
+
 async function exportPNG() {
   // Tomar todos los SVG de la sección de placas y construir una imagen vertical
   const svgs = Array.from(document.querySelectorAll('#sheetCanvas svg'));
@@ -1926,102 +2071,245 @@ async function exportPNG() {
   download(fname, dataUrl);
 }
 
-function exportPDF() {
-  // Usa el PNG generado en una ventana nueva y dispara imprimir
-  const doExport = async () => {
-    const svgs = document.querySelectorAll('#sheetCanvas svg');
-    if (!svgs.length) { alert('No hay placas para exportar'); return; }
-    // Reutilizamos exportPNG para obtener el data URL, pero sin descargar
-    const margin = 20;
-    const targetW = 1200;
-    const images = await Promise.all(Array.from(svgs).map(svg => new Promise((resolve) => {
-      const svg64 = svgDataUrlForExport(svg);
-      const img = new Image();
-      img.onload = () => resolve({ img, w: img.width, h: img.height });
-      img.src = svg64;
-    })));
-    const scaled = images.map(({ img, w, h }) => ({ img, w: targetW, h: Math.round(h * (targetW / w)) }));
+async function exportPDF() {
+  const result = await buildExportCanvasForPdf();
+  if (!result) return;
+  const { canvas, projectName } = result;
+  const dataUrl = canvas.toDataURL('image/png');
+  const win = window.open('', '_blank');
+  if (!win) {
+    const name = (projectName || 'cortes').trim();
+    download(name ? `plano-${name.replace(/\s+/g, '_')}.png` : 'plano-cortes.png', dataUrl);
+    return;
+  }
+  win.document.write(`<html><head><title>Plano de cortes</title><style>body{margin:0} img{width:100%;}</style></head><body><img src="${dataUrl}" onload="setTimeout(()=>window.print(), 250)" /></body></html>`);
+  win.document.close();
+}
 
-    const summaryTexts = [];
-    const addSummary = (text) => {
-      const trimmed = (text || '').trim();
-      if (trimmed) summaryTexts.push(trimmed);
-    };
-    addSummary(currentMaterialName ? `Material: ${currentMaterialName}` : '');
-    addSummary(summaryPiecesEl?.textContent);
-    addSummary(summaryReqEl?.textContent);
-    addSummary(summaryPlacedEl?.textContent);
-    addSummary(summaryLeftEl?.textContent);
-    addSummary(summaryAreaEl?.textContent);
-    addSummary(summaryWasteEl?.textContent);
-    addSummary(summaryUtilEl?.textContent);
-    addSummary(summaryTotalEl?.textContent);
+function canvasToPdfBlob(canvas) {
+  const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.94);
+  const base64 = jpegDataUrl.split(',')[1];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const pdfBytes = buildPdfFromJpeg(bytes, canvas.width, canvas.height);
+  return new Blob([pdfBytes], { type: 'application/pdf' });
+}
 
-    const rowSummaries = Array.from(summaryListEl?.querySelectorAll('li span:last-child') || [])
-      .map((span) => span.textContent?.trim())
-      .filter(Boolean);
+function buildPdfFromJpeg(jpegBytes, widthPx, heightPx) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const offsets = [0];
+  let position = 0;
 
-    const summaryLineHeight = 20;
-    const headingHeight = 20;
-    const columnGap = 40;
-    const contentGap = 6;
-    const summaryStartY = margin + 44;
-    const leftBottom = summaryTexts.length
-      ? summaryStartY + headingHeight + contentGap + summaryTexts.length * summaryLineHeight
-      : summaryStartY + headingHeight;
-    const rightBottom = rowSummaries.length
-      ? summaryStartY + headingHeight + contentGap + rowSummaries.length * summaryLineHeight
-      : summaryStartY + headingHeight;
-    const summaryBlockBottom = Math.max(leftBottom, rightBottom);
-    const headerH = Math.max(120, summaryBlockBottom + margin);
-
-    const totalH = headerH + margin + scaled.reduce((acc, s) => acc + s.h + margin, 0);
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW + margin * 2;
-    canvas.height = totalH;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#111827';
-    ctx.font = 'bold 20px system-ui';
-    const title = (projectNameEl?.value || '').trim() || 'Plano de cortes';
-    ctx.fillText(title, margin, 34);
-
-    const columnWidth = (targetW - margin * 2 - columnGap) / 2;
-    const leftX = margin;
-    const rightX = margin + columnWidth + columnGap;
-    const headingYOffset = summaryStartY;
-    const bodyStartY = headingYOffset + headingHeight + contentGap;
-
-    ctx.font = 'bold 16px system-ui';
-    ctx.fillText('Resumen', leftX, headingYOffset);
-    ctx.fillText('Filas', rightX, headingYOffset);
-
-    ctx.font = '16px system-ui';
-    summaryTexts.forEach((line, idx) => {
-      ctx.fillText(line, leftX, bodyStartY + idx * summaryLineHeight);
-    });
-    rowSummaries.forEach((line, idx) => {
-      ctx.fillText(line, rightX, bodyStartY + idx * summaryLineHeight);
-    });
-    let y = headerH;
-    scaled.forEach(({ img, w, h }, idx) => {
-      ctx.fillStyle = '#111827';
-      ctx.font = '14px system-ui';
-      ctx.fillText(`Placa ${idx + 1}`, margin, y - 6);
-      ctx.drawImage(img, margin, y, w, h);
-      y += h + margin;
-    });
-    const dataUrl = canvas.toDataURL('image/png');
-    const win = window.open('', '_blank');
-    if (!win) { const name = (projectNameEl?.value || '').trim(); download(name?`plano-${name.replace(/\s+/g,'_')}.png`:'plano-cortes.png', dataUrl); return; }
-    win.document.write(`<html><head><title>Plano de cortes</title><style>body{margin:0} img{width:100%;}</style></head><body><img src="${dataUrl}" onload="setTimeout(()=>window.print(), 250)" /></body></html>`);
-    win.document.close();
+  const push = (data) => {
+    parts.push(data);
+    position += data.length;
   };
-  doExport();
+
+  const pushString = (str) => {
+    push(encoder.encode(str));
+  };
+
+  pushString('%PDF-1.3\n');
+
+  offsets[1] = position;
+  pushString('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n');
+
+  offsets[2] = position;
+  pushString('2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n');
+
+  const widthPt = Math.round(widthPx * 72 / 96);
+  const heightPt = Math.round(heightPx * 72 / 96);
+
+  offsets[3] = position;
+  pushString(`3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${widthPt} ${heightPt}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >> endobj\n`);
+
+  offsets[4] = position;
+  pushString(`4 0 obj << /Type /XObject /Subtype /Image /Width ${widthPx} /Height ${heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >> stream\n`);
+  push(jpegBytes);
+  pushString('\nendstream\nendobj\n');
+
+  const contentStream = `q\n${widthPt} 0 0 ${heightPt} 0 0 cm\n/Im0 Do\nQ\n`;
+  const contentBytes = encoder.encode(contentStream);
+
+  offsets[5] = position;
+  pushString(`5 0 obj << /Length ${contentBytes.length} >> stream\n`);
+  push(contentBytes);
+  pushString('endstream\nendobj\n');
+
+  const xrefOffset = position;
+  pushString('xref\n0 6\n0000000000 65535 f \n');
+  for (let i = 1; i <= 5; i++) {
+    const offset = offsets[i] ?? 0;
+    pushString(`${offset.toString().padStart(10, '0')} 00000 n \n`);
+  }
+  pushString(`trailer << /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+
+  return concatUint8Arrays(parts);
+}
+
+function concatUint8Arrays(arrays) {
+  const totalLength = arrays.reduce((acc, arr) => acc + arr.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  arrays.forEach((arr) => {
+    result.set(arr, offset);
+    offset += arr.length;
+  });
+  return result;
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      } else {
+        reject(new Error('No se pudo leer el archivo adjunto.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo adjunto.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function chunkString(str, size = 76) {
+  const chunks = [];
+  for (let i = 0; i < str.length; i += size) {
+    chunks.push(str.substring(i, i + size));
+  }
+  return chunks.join('\r\n');
+}
+
+function toBase64UrlFromUint8(uint8) {
+  let binary = '';
+  for (let i = 0; i < uint8.length; i++) {
+    binary += String.fromCharCode(uint8[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function encodeMimeWord(str) {
+  const utf8 = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < utf8.length; i++) {
+    binary += String.fromCharCode(utf8[i]);
+  }
+  const base64 = btoa(binary);
+  return `=?UTF-8?B?${base64}?=`;
+}
+
+async function sendEmailWithAttachment({ token, to, subject, text, filename, blob }) {
+  if (!token) throw new Error('Falta el token de acceso para enviar el correo.');
+  const pdfBase64 = await blobToBase64(blob);
+  const boundary = `mixed_${Math.random().toString(36).slice(2)}`;
+  const mimeParts = [
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    `to: ${to}`,
+    `subject: ${encodeMimeWord(subject)}`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    text,
+    '',
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${filename}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${filename}"`,
+    '',
+    chunkString(pdfBase64),
+    `--${boundary}--`,
+    ''
+  ];
+  const message = mimeParts.join('\r\n');
+  const messageBytes = new TextEncoder().encode(message);
+  const raw = toBase64UrlFromUint8(messageBytes);
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw })
+  });
+  if (!response.ok) {
+    let details = '';
+    try {
+      const errorBody = await response.json();
+      details = errorBody?.error?.message ? `: ${errorBody.error.message}` : '';
+    } catch (_) {}
+    throw new Error(`Google respondió ${response.status}${details}`);
+  }
+  return response.json();
+}
+
+async function handleSendCuts() {
+  if (!sendCutsBtn) return;
+  if (sendCutsBtn.disabled) return;
+  const projectName = (projectNameEl?.value || '').trim();
+  if (!projectName) {
+    alert('Ingresá un nombre de proyecto antes de enviar.');
+    projectNameEl?.focus();
+    return;
+  }
+  if (!authUser) {
+    alert('Iniciá sesión antes de enviar los cortes.');
+    return;
+  }
+  if (!authUser.accessToken) {
+    alert('No se encontró el token de Google para enviar el correo. Cerrá sesión e ingresá nuevamente.');
+    return;
+  }
+  sendCutsBtn.disabled = true;
+  sendCutsBtn.textContent = 'Enviando…';
+  try {
+    const result = await buildExportCanvasForPdf();
+    if (!result) return;
+    const { canvas, projectName: rawName, title } = result;
+    const pdfBlob = canvasToPdfBlob(canvas);
+    const baseName = (rawName || 'cortes').trim() || 'cortes';
+    const slug = baseName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase() || 'cortes';
+    const filename = `cortes-${slug}.pdf`;
+    triggerBlobDownload(filename, pdfBlob);
+    const subjectName = rawName || title || 'Plano de cortes';
+    const bodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
+    await sendEmailWithAttachment({
+      token: authUser.accessToken,
+      to: 'marcossuhit@gmail.com',
+      subject: `Plano de cortes - ${subjectName}`,
+      text: bodyText,
+      filename,
+      blob: pdfBlob
+    });
+    alert(`Se envió ${filename} a marcossuhit@gmail.com.`);
+  } catch (err) {
+    console.error(err);
+    alert(`No se pudo enviar el correo: ${err?.message || err}`);
+  } finally {
+    sendCutsBtn.disabled = false;
+    sendCutsBtn.textContent = sendCutsDefaultLabel;
+  }
 }
 
 if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportPDF);
+if (sendCutsBtn) {
+  sendCutsBtn.addEventListener('click', () => {
+    handleSendCuts();
+  });
+}
 if (resetAllBtn) {
   resetAllBtn.addEventListener('click', () => {
     clearAllPlates();

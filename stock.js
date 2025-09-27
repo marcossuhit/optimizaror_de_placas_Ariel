@@ -13,6 +13,8 @@ const closeWindowBtn = document.getElementById('closeWindowBtn');
 
 let stockItems = [];
 
+const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
+
 function normaliseMaterialName(name) {
   return (name || '').trim();
 }
