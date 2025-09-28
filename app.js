@@ -34,11 +34,14 @@ const userAvatarEl = document.getElementById('userAvatar');
 const signOutBtn = document.getElementById('signOutBtn');
 const sendCutsBtn = document.getElementById('sendCutsBtn');
 const sendCutsDefaultLabel = sendCutsBtn?.textContent || 'Enviar cortes';
+const ALLOWED_ADMIN_EMAILS = new Set(['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com']);
 
 const LS_KEY = 'cortes_proyecto_v1';
 const DEFAULT_MATERIAL = 'MDF Blanco';
 const LAST_MATERIAL_KEY = 'selected_material_v1';
+const EDGE_STORAGE_KEY = 'edgeband_items_v1';
 let collapsedPlates = new Set();
+let edgeCatalog = [];
 
 // Estado para sincronizar resumen por fila
 let lastEdgebandByRow = new Map(); // rowIdx -> mm subtotal
@@ -52,7 +55,22 @@ try {
 const STOCK_STORAGE_KEY = 'stock_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
 
+function resetSummaryUI() {
+  lastEdgebandByRow.clear();
+  lastPlacementByRow.clear();
+  if (summaryPiecesEl) summaryPiecesEl.textContent = '';
+  if (summaryReqEl) summaryReqEl.textContent = '';
+  if (summaryPlacedEl) summaryPlacedEl.textContent = '';
+  if (summaryLeftEl) summaryLeftEl.textContent = '';
+  if (summaryAreaEl) summaryAreaEl.textContent = '';
+  if (summaryWasteEl) summaryWasteEl.textContent = '';
+  if (summaryUtilEl) summaryUtilEl.textContent = '';
+  if (summaryTotalEl) summaryTotalEl.textContent = '';
+  if (summaryListEl) summaryListEl.innerHTML = '';
+}
+
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
+resetSummaryUI();
 
 if (signOutBtn) {
   signOutBtn.addEventListener('click', () => {
@@ -93,9 +111,19 @@ if (userSessionEl) {
   }
 }
 
+const isBackofficeAllowed = !!(authUser && ALLOWED_ADMIN_EMAILS.has((authUser.email || '').toLowerCase()));
+if (manageStockBtn && !isBackofficeAllowed) {
+  manageStockBtn.style.display = 'none';
+}
+
 function updateRowSummaryUI() {
   if (!summaryListEl) return;
   summaryListEl.innerHTML = '';
+  const hasPlacementData = Array.from(lastPlacementByRow.values()).some((entry) => {
+    if (!entry) return false;
+    return (entry.requested ?? 0) > 0 || (entry.placed ?? 0) > 0 || (entry.left ?? 0) > 0;
+  });
+  if (!hasPlacementData && lastEdgebandByRow.size === 0) return;
   const rows = getRows();
   for (let i = 0; i < rows.length && i < 50; i++) {
     const color = getRowColor(i);
@@ -146,6 +174,7 @@ function parseStockText(text) {
 }
 
 function loadStockFromStorage() {
+  if (!isBackofficeAllowed) return null;
   try {
     const raw = localStorage.getItem(STOCK_STORAGE_KEY);
     if (!raw) return null;
@@ -171,6 +200,80 @@ async function fetchStockItems() {
   if (fromStorage && fromStorage.length) return fromStorage;
   return loadStockFromText();
 }
+
+function loadEdgeCatalog() {
+  try {
+    const raw = localStorage.getItem(EDGE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        name: String(item?.name || '').trim(),
+        pricePerMeter: Number.parseFloat(item?.pricePerMeter) || 0
+      }))
+      .filter((item) => item.name);
+  } catch (_) {
+    return [];
+  }
+}
+
+function formatEdgeLabel(item) {
+  if (!item) return '';
+  const hasPrice = Number.isFinite(item.pricePerMeter) && item.pricePerMeter > 0;
+  if (hasPrice) {
+    return `${item.name} — $${formatNumber(item.pricePerMeter, 2)}/m`;
+  }
+  return item.name;
+}
+
+function populateEdgeSelectOptions(select, selectedValue) {
+  if (!select) return;
+  const value = selectedValue !== undefined ? selectedValue : select.value;
+  select.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Sin cubre canto';
+  select.appendChild(placeholder);
+
+  let matched = false;
+  edgeCatalog.forEach((item) => {
+    const option = document.createElement('option');
+    option.value = item.name;
+    option.textContent = formatEdgeLabel(item);
+    if (value && item.name.localeCompare(value, undefined, { sensitivity: 'accent' }) === 0) {
+      matched = true;
+    }
+    select.appendChild(option);
+  });
+
+  if (value && !matched) {
+    const fallback = document.createElement('option');
+    fallback.value = value;
+    fallback.textContent = `${value} (no listado)`;
+    fallback.dataset.missing = '1';
+    select.appendChild(fallback);
+    matched = true;
+  }
+
+  if (matched && value) {
+    select.value = value;
+  } else {
+    select.value = '';
+  }
+}
+
+function refreshEdgeCatalog({ updateRows = true } = {}) {
+  edgeCatalog = loadEdgeCatalog().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  if (updateRows) {
+    getRows().forEach((row) => {
+      if (row._refreshEdgeSelects) row._refreshEdgeSelects();
+    });
+  }
+  recalcEdgebanding();
+}
+
+refreshEdgeCatalog({ updateRows: false });
 
 function rebuildMaterialOptions(names, { placeholder = false } = {}) {
   if (!plateMaterialSelect) return;
@@ -236,7 +339,7 @@ async function refreshMaterialOptions() {
     currentMaterialName = '';
     try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
   }
-  rebuildMaterialOptions(names, { placeholder: 'Agregá materiales en el backoffice' });
+  rebuildMaterialOptions(names, { placeholder: isBackofficeAllowed ? 'Agregá materiales en el backoffice' : 'Sin placas disponibles' });
 }
 
 function getRows() {
@@ -1025,11 +1128,16 @@ function makeRow(index) {
   iWLevel.dataset.role = 'width-tier';
   iWLevel.title = 'Solo números 0, 1 o 2';
   iWLevel.setAttribute('aria-label', 'Ancho adicional (0 a 2)');
+  const wEdgeSelect = document.createElement('select');
+  wEdgeSelect.className = 'edge-select';
+  wEdgeSelect.dataset.role = 'width-edge';
+  wEdgeSelect.setAttribute('aria-label', 'Tipo de cubre canto horizontal');
   const wWrap = document.createElement('div');
   wWrap.className = 'dim-inputs';
   fW.appendChild(lW);
   wWrap.appendChild(iW);
   wWrap.appendChild(iWLevel);
+  wWrap.appendChild(wEdgeSelect);
   fW.appendChild(wWrap);
 
   // Alto
@@ -1056,11 +1164,16 @@ function makeRow(index) {
   iHLevel.dataset.role = 'height-tier';
   iHLevel.title = 'Solo números 0, 1 o 2';
   iHLevel.setAttribute('aria-label', 'Alto adicional (0 a 2)');
+  const hEdgeSelect = document.createElement('select');
+  hEdgeSelect.className = 'edge-select';
+  hEdgeSelect.dataset.role = 'height-edge';
+  hEdgeSelect.setAttribute('aria-label', 'Tipo de cubre canto vertical');
   const hWrap = document.createElement('div');
   hWrap.className = 'dim-inputs';
   fH.appendChild(lH);
   hWrap.appendChild(iH);
   hWrap.appendChild(iHLevel);
+  hWrap.appendChild(hEdgeSelect);
   fH.appendChild(hWrap);
 
   // Acciones (unidades / eliminar)
@@ -1074,8 +1187,55 @@ function makeRow(index) {
   colorDot.title = 'Color de esta fila';
   colorDot.style.background = getRowColor(index);
 
-  const rowInputs = [iQty, iW, iH];
+  const navElements = [
+    { el: iQty, validate: (input) => {
+      const num = parseInt(input.value, 10);
+      return Number.isFinite(num) && num >= 1;
+    } },
+    { el: iW, validate: (input) => {
+      const num = parseFloat(input.value);
+      return Number.isFinite(num) && num > 0;
+    } },
+    { el: iWLevel, validate: () => true },
+    { el: wEdgeSelect, validate: () => true },
+    { el: iH, validate: (input) => {
+      const num = parseFloat(input.value);
+      return Number.isFinite(num) && num > 0;
+    } },
+    { el: iHLevel, validate: () => true },
+    { el: hEdgeSelect, validate: () => true }
+  ];
   const tierInputs = [iWLevel, iHLevel];
+
+  const parseTierValue = (input) => {
+    if (!input) return 0;
+    const val = parseInt(input.value, 10);
+    if (!Number.isFinite(val)) return 0;
+    return clamp(val, 0, 2);
+  };
+
+  const computeEdgeCounts = () => {
+    const leftSelected = edges.left.dataset.selected === '1';
+    const rightSelected = edges.right.dataset.selected === '1';
+    const topSelected = edges.top.dataset.selected === '1';
+    const bottomSelected = edges.bottom.dataset.selected === '1';
+    const previewVertical = (leftSelected ? 1 : 0) + (rightSelected ? 1 : 0);
+    const previewHorizontal = (topSelected ? 1 : 0) + (bottomSelected ? 1 : 0);
+    const widthTierVal = parseTierValue(iWLevel);
+    const heightTierVal = parseTierValue(iHLevel);
+    return {
+      previewVertical,
+      previewHorizontal,
+      verticalCount: Math.max(previewVertical, widthTierVal),
+      horizontalCount: Math.max(previewHorizontal, heightTierVal),
+      widthTierVal,
+      heightTierVal,
+      leftSelected,
+      rightSelected,
+      topSelected,
+      bottomSelected
+    };
+  };
   const focusInput = (input) => {
     if (!input) return;
     requestAnimationFrame(() => {
@@ -1083,28 +1243,32 @@ function makeRow(index) {
       if (typeof input.select === 'function') input.select();
     });
   };
-  const hasNumericValue = (value, fieldIdx) => {
-    const str = String(value ?? '').trim();
-    if (!str) return false;
-    if (fieldIdx === 0) {
-      const num = parseInt(str, 10);
-      return Number.isFinite(num) && num >= 1;
+  const focusNextNav = (currentIdx) => {
+    for (let next = currentIdx + 1; next < navElements.length; next++) {
+      const nextEl = navElements[next]?.el;
+      if (nextEl && !nextEl.disabled) {
+        focusInput(nextEl);
+        return true;
+      }
     }
-    const num = parseFloat(str);
-    return Number.isFinite(num) && num > 0;
+    return false;
   };
+
+  const focusFirstNavInRow = (targetRow) => {
+    if (!targetRow) return;
+    const nav = targetRow._navElements || [];
+    const nextEl = nav.find((el) => el && !el.disabled) || targetRow.querySelector(ROW_CORE_SELECTORS.qty);
+    focusInput(nextEl);
+  };
+
   const handleEnter = (fieldIdx) => (event) => {
     if (event.key !== 'Enter') return;
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (!hasNumericValue(target.value, fieldIdx)) return;
+    const config = navElements[fieldIdx];
+    if (!config || event.target !== config.el) return;
+    if (typeof config.validate === 'function' && !config.validate(config.el)) return;
     event.preventDefault();
 
-    const nextIdx = fieldIdx + 1;
-    if (nextIdx < rowInputs.length) {
-      focusInput(rowInputs[nextIdx]);
-      return;
-    }
+    if (focusNextNav(fieldIdx)) return;
 
     let nextRow = row.nextElementSibling;
     while (nextRow && !nextRow.classList.contains('row')) {
@@ -1121,13 +1285,13 @@ function makeRow(index) {
     }
 
     if (nextRow) {
-      const nextInput = nextRow?.querySelector(ROW_CORE_SELECTORS.qty);
-      focusInput(nextInput);
+      focusFirstNavInRow(nextRow);
     }
   };
 
-  rowInputs.forEach((input, idx) => {
-    input.addEventListener('keydown', handleEnter(idx));
+  navElements.forEach((cfg, idx) => {
+    if (!cfg.el) return;
+    cfg.el.addEventListener('keydown', handleEnter(idx));
   });
   const applyTierChange = () => {
     recalcEdgebanding();
@@ -1144,6 +1308,40 @@ function makeRow(index) {
   tierInputs.forEach((input) => {
     input.addEventListener('input', () => handleTierInputChange(input));
   });
+  const handleEdgeSelectChange = () => {
+    recalcEdgebanding();
+    renderSheetOverview();
+    if (typeof persistState === 'function') persistState();
+  };
+  wEdgeSelect.addEventListener('change', handleEdgeSelectChange);
+  hEdgeSelect.addEventListener('change', handleEdgeSelectChange);
+
+  const updateEdgeSelectState = () => {
+    if (!row._inputsEnabled) {
+      wEdgeSelect.disabled = true;
+      hEdgeSelect.disabled = true;
+      return;
+    }
+    const { verticalCount, horizontalCount } = computeEdgeCounts();
+    const states = [
+      { select: wEdgeSelect, enable: verticalCount > 0 },
+      { select: hEdgeSelect, enable: horizontalCount > 0 }
+    ];
+    let cleared = false;
+    states.forEach(({ select, enable }) => {
+      if (!select) return;
+      if (enable) {
+        if (select.disabled) select.disabled = false;
+      } else {
+        if (!select.disabled) select.disabled = true;
+        if (select.value) {
+          select.value = '';
+          cleared = true;
+        }
+      }
+    });
+    if (cleared) handleEdgeSelectChange();
+  };
   const rotWrap = document.createElement('label');
   rotWrap.className = 'rot-label';
   const iRot = document.createElement('input');
@@ -1228,6 +1426,7 @@ function makeRow(index) {
     const heightStr = String(heightCount);
     if (iWLevel.value !== widthStr) iWLevel.value = widthStr;
     if (iHLevel.value !== heightStr) iHLevel.value = heightStr;
+    updateEdgeSelectState();
   }
 
   function setEdgeSelected(edge, selected, skipTierSync = false) {
@@ -1340,6 +1539,17 @@ function makeRow(index) {
   row.appendChild(actions);
   row.appendChild(preview);
 
+  row._navElements = navElements.map(cfg => cfg.el).filter(Boolean);
+  row._refreshEdgeSelects = () => {
+    populateEdgeSelectOptions(wEdgeSelect);
+    populateEdgeSelectOptions(hEdgeSelect);
+    updateEdgeSelectState();
+  };
+  row._edgeSelects = { width: wEdgeSelect, height: hEdgeSelect };
+  row._computeEdgeCounts = computeEdgeCounts;
+  row._updateEdgeSelectState = updateEdgeSelectState;
+  row._refreshEdgeSelects();
+
   function setInputsEnabled(enabled) {
     row._inputsEnabled = !!enabled;
     iQty.disabled = !enabled;
@@ -1347,6 +1557,12 @@ function makeRow(index) {
     iH.disabled = !enabled;
     iWLevel.disabled = !enabled;
     iHLevel.disabled = !enabled;
+    if (!enabled) {
+      wEdgeSelect.disabled = true;
+      hEdgeSelect.disabled = true;
+    } else {
+      updateEdgeSelectState();
+    }
   }
 
   // Lógica para ajustar el rect y los bordes según ancho/alto y rotación
@@ -1646,9 +1862,14 @@ if (platesEl && addPlateBtn) {
 if (kerfInput) kerfInput.addEventListener('input', () => { applyPlatesGate(); });
 
 refreshMaterialOptions();
-window.addEventListener('focus', () => { refreshMaterialOptions(); });
+refreshEdgeCatalog();
+window.addEventListener('focus', () => {
+  refreshMaterialOptions();
+  refreshEdgeCatalog();
+});
 window.addEventListener('storage', (event) => {
   if (event.key === STOCK_STORAGE_KEY) refreshMaterialOptions();
+  if (event.key === EDGE_STORAGE_KEY) refreshEdgeCatalog();
 });
 
 // -------- Persistencia (Guardar/Cargar) --------
@@ -1661,6 +1882,8 @@ function serializeState() {
     const h = parseFloat(heightInput?.value) || 0;
     const widthTier = parseInt(row.querySelector('input[data-role="width-tier"]')?.value ?? '', 10);
     const heightTier = parseInt(row.querySelector('input[data-role="height-tier"]')?.value ?? '', 10);
+    const widthEdgeSelect = row.querySelector('select[data-role="width-edge"]');
+    const heightEdgeSelect = row.querySelector('select[data-role="height-edge"]');
     const rotEl = row.querySelector('.rot-label input');
     const manualRot = row._manualRotWanted;
     const rot = typeof manualRot === 'boolean' ? manualRot : !!(rotEl && rotEl.checked);
@@ -1672,7 +1895,9 @@ function serializeState() {
       rot,
       edges,
       widthTier: Number.isFinite(widthTier) ? clamp(widthTier, 0, 2) : null,
-      heightTier: Number.isFinite(heightTier) ? clamp(heightTier, 0, 2) : null
+      heightTier: Number.isFinite(heightTier) ? clamp(heightTier, 0, 2) : null,
+      widthEdge: widthEdgeSelect && widthEdgeSelect.value ? widthEdgeSelect.value : null,
+      heightEdge: heightEdgeSelect && heightEdgeSelect.value ? heightEdgeSelect.value : null
     };
   });
   const name = (projectNameEl?.value || '').trim();
@@ -1850,6 +2075,8 @@ function loadState(state) {
       if (heightInput) heightInput.value = it.h != null ? String(it.h) : '';
       const widthTierInput = r.querySelector('input[data-role="width-tier"]');
       const heightTierInput = r.querySelector('input[data-role="height-tier"]');
+      const widthEdgeSelect = r.querySelector('select[data-role="width-edge"]');
+      const heightEdgeSelect = r.querySelector('select[data-role="height-edge"]');
       if (widthTierInput) {
         const wVal = clamp(parseInt(it.widthTier ?? '', 10) || 0, 0, 2);
         widthTierInput.value = it.widthTier == null ? '' : String(wVal);
@@ -1858,6 +2085,13 @@ function loadState(state) {
         const hVal = clamp(parseInt(it.heightTier ?? '', 10) || 0, 0, 2);
         heightTierInput.value = it.heightTier == null ? '' : String(hVal);
       }
+      if (widthEdgeSelect) {
+        populateEdgeSelectOptions(widthEdgeSelect, typeof it.widthEdge === 'string' ? it.widthEdge : '');
+      }
+      if (heightEdgeSelect) {
+        populateEdgeSelectOptions(heightEdgeSelect, typeof it.heightEdge === 'string' ? it.heightEdge : '');
+      }
+      if (r._updateEdgeSelectState) r._updateEdgeSelectState();
       const rotEl = r.querySelector('.rot-label input');
       if (rotEl) rotEl.checked = !!it.rot;
       if (typeof it.rot === 'boolean') {
@@ -2325,15 +2559,30 @@ if (resetAllBtn) {
     }
     applyPlatesGate();
     ensureDefaultRows();
+    resetSummaryUI();
   });
 }
 
 // Cálculo de Cantidad de cubre canto (suma de lados seleccionados)
 function recalcEdgebanding() {
   const rows = getRows();
-  let totalMm = 0;
+  let totalMeters = 0;
+  let totalCost = 0;
   const items = [];
+  const edgeTotals = new Map();
+  const showCosts = !!isBackofficeAllowed;
+  const priceMap = new Map(edgeCatalog.map((item) => [item.name.toLocaleLowerCase(), Number.isFinite(item.pricePerMeter) ? item.pricePerMeter : 0]));
   lastEdgebandByRow = new Map();
+
+  const addEdgeUsage = (edgeName, mm) => {
+    if (!(mm > 0)) return;
+    const name = (edgeName || '').trim();
+    if (!name) return;
+    const key = name.toLocaleLowerCase();
+    const entry = edgeTotals.get(key) || { name, mm: 0 };
+    entry.mm += mm;
+    edgeTotals.set(key, entry);
+  };
 
   rows.forEach((row, idx) => {
     const [qtyInput, widthInput, heightInput] = getRowCoreInputs(row);
@@ -2343,42 +2592,85 @@ function recalcEdgebanding() {
     const h = parseFloat(heightInput.value);
     if (!(qty >= 1 && w > 0 && h > 0)) return;
 
-    const edges = row.querySelectorAll('line.edge');
-    const edgeArr = Array.from(edges);
-    const topSelected = edgeArr[0]?.dataset.selected === '1';
-    const rightSelected = edgeArr[1]?.dataset.selected === '1';
-    const bottomSelected = edgeArr[2]?.dataset.selected === '1';
-    const leftSelected = edgeArr[3]?.dataset.selected === '1';
-    const widthTierInput = row.querySelector('input[data-role="width-tier"]');
-    const heightTierInput = row.querySelector('input[data-role="height-tier"]');
-    const parseTier = (input) => {
-      if (!input) return 0;
-      const val = parseInt(input.value, 10);
-      if (!Number.isFinite(val)) return 0;
-      return clamp(val, 0, 2);
-    };
-    const widthTier = parseTier(widthTierInput);
-    const heightTier = parseTier(heightTierInput);
+    const counts = row._computeEdgeCounts
+      ? row._computeEdgeCounts()
+      : (() => {
+          const edges = row.querySelectorAll('line.edge');
+          const edgeArr = Array.from(edges);
+          const topSelected = edgeArr[0]?.dataset.selected === '1';
+          const rightSelected = edgeArr[1]?.dataset.selected === '1';
+          const bottomSelected = edgeArr[2]?.dataset.selected === '1';
+          const leftSelected = edgeArr[3]?.dataset.selected === '1';
+          const previewVertical = (leftSelected ? 1 : 0) + (rightSelected ? 1 : 0);
+          const previewHorizontal = (topSelected ? 1 : 0) + (bottomSelected ? 1 : 0);
+          const parseTier = (input) => {
+            if (!input) return 0;
+            const val = parseInt(input.value, 10);
+            if (!Number.isFinite(val)) return 0;
+            return clamp(val, 0, 2);
+          };
+          const widthTierVal = parseTier(row.querySelector('input[data-role="width-tier"]'));
+          const heightTierVal = parseTier(row.querySelector('input[data-role="height-tier"]'));
+          return {
+            previewVertical,
+            previewHorizontal,
+            verticalCount: Math.max(previewVertical, widthTierVal),
+            horizontalCount: Math.max(previewHorizontal, heightTierVal),
+            widthTierVal,
+            heightTierVal
+          };
+        })();
     const rot = row._getRotation ? row._getRotation() : false;
     const effW = rot ? h : w;
     const effH = rot ? w : h;
-    const previewHorizontal = (topSelected ? 1 : 0) + (bottomSelected ? 1 : 0);
-    const previewVertical = (leftSelected ? 1 : 0) + (rightSelected ? 1 : 0);
-    const horizontalCount = Math.max(previewHorizontal, heightTier);
-    const verticalCount = Math.max(previewVertical, widthTier);
-    const perPiece = horizontalCount * effW + verticalCount * effH;
-    const subtotal = perPiece * qty;
+    const widthTierVal = Number.isFinite(counts?.widthTierVal) ? counts.widthTierVal : 0;
+    const heightTierVal = Number.isFinite(counts?.heightTierVal) ? counts.heightTierVal : 0;
+    const horizontalMm = widthTierVal * effW * qty;
+    const verticalMm = heightTierVal * effH * qty;
+    const subtotal = horizontalMm + verticalMm;
     if (subtotal > 0) {
       items.push({ idx: idx + 1, subtotal, color: getRowColor(idx) });
       lastEdgebandByRow.set(idx, subtotal);
-      totalMm += subtotal;
+      const widthEdgeSelect = row._edgeSelects?.width || row.querySelector('select[data-role="width-edge"]');
+      const heightEdgeSelect = row._edgeSelects?.height || row.querySelector('select[data-role="height-edge"]');
+      const widthEdgeName = widthEdgeSelect?.value || '';
+      const heightEdgeName = heightEdgeSelect?.value || '';
+      addEdgeUsage(widthEdgeName, horizontalMm);
+      addEdgeUsage(heightEdgeName, verticalMm);
     }
   });
 
   const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
   if (summaryTotalEl) {
-    const meters = totalMm / 1000;
-    summaryTotalEl.textContent = `Cantidad de cubre canto: ${fmt(totalMm, 0)} mm (${fmt(meters, 3)} m)`;
+    const lines = [];
+    const summaryEntries = Array.from(edgeTotals.values()).sort((a, b) => b.mm - a.mm);
+    summaryEntries.forEach((entry) => {
+      const meters = entry.mm / 1000;
+      const normalized = entry.name ? entry.name.toLocaleLowerCase() : '';
+      const hasCatalogPrice = normalized ? priceMap.has(normalized) : false;
+      const price = hasCatalogPrice ? (priceMap.get(normalized) || 0) : 0;
+      const cost = meters * price;
+      const label = entry.name && !hasCatalogPrice ? `${entry.name} (no catalogado)` : entry.name;
+      totalMeters += meters;
+      if (showCosts) totalCost += cost;
+      lines.push({ label, meters, cost: showCosts ? cost : null });
+    });
+    if (lines.length) {
+      summaryTotalEl.textContent = '';
+      const totalLine = document.createElement('div');
+      totalLine.textContent = showCosts
+        ? `Cubre canto total: ${fmt(totalMeters, 3)} m — $${fmt(totalCost, 2)}`
+        : `Cubre canto total: ${fmt(totalMeters, 3)} m`;
+      summaryTotalEl.appendChild(totalLine);
+      lines.forEach(({ label, meters, cost }) => {
+        const lineDiv = document.createElement('div');
+        const costText = showCosts && Number.isFinite(cost) ? ` — $${fmt(cost, 2)}` : '';
+        lineDiv.textContent = `${label}: ${fmt(meters, 3)} m${costText}`;
+        summaryTotalEl.appendChild(lineDiv);
+      });
+    } else {
+      summaryTotalEl.textContent = '';
+    }
   }
   // Actualizar lista combinada (con datos de colocación)
   updateRowSummaryUI();
@@ -2394,6 +2686,7 @@ function renderSheetOverview() {
     hint.className = 'hint';
     hint.textContent = 'Configure la placa para ver la vista';
     sheetCanvasEl.appendChild(hint);
+    resetSummaryUI();
     return;
   }
 
@@ -2699,6 +2992,11 @@ function renderSheetOverview() {
   const wasteMm2 = Math.max(0, solution.wasteArea);
   const areaM2 = areaMm2 / 1e6;
   const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
+  const hasSummaryData = totalRequested > 0 || piecesCount > 0;
+  if (!hasSummaryData) {
+    resetSummaryUI();
+    return;
+  }
   if (summaryPiecesEl) summaryPiecesEl.textContent = `Piezas colocadas: ${piecesCount}`;
   if (summaryReqEl) summaryReqEl.textContent = `Cortes pedidos: ${totalRequested}`;
   if (summaryPlacedEl) summaryPlacedEl.textContent = `Colocados: ${piecesCount}`;
@@ -2787,24 +3085,57 @@ window.addEventListener('appinstalled', () => {
 // Tema claro/oscuro
 const THEME_KEY = 'cortes_theme_v1';
 const VISITS_KEY = 'cortes_visits_v1';
+const getThemeStorage = () => {
+  try {
+    return window.sessionStorage;
+  } catch (_) {
+    return null;
+  }
+};
+const readStoredTheme = () => {
+  const storage = getThemeStorage();
+  if (storage) {
+    try {
+      const value = storage.getItem(THEME_KEY);
+      if (value) return value;
+    } catch (_) {}
+  }
+  try { localStorage.removeItem(THEME_KEY); } catch (_) {}
+  return null;
+};
+const writeStoredTheme = (value) => {
+  const storage = getThemeStorage();
+  if (!storage) return;
+  try { storage.setItem(THEME_KEY, value); } catch (_) {}
+};
+function clearStoredTheme() {
+  const storage = getThemeStorage();
+  if (storage) {
+    try { storage.removeItem(THEME_KEY); } catch (_) {}
+  }
+  try { localStorage.removeItem(THEME_KEY); } catch (_) {}
+}
+window.__clearThemePreference = clearStoredTheme;
 function applyTheme(theme) {
   const isLight = theme === 'light';
   document.body.classList.toggle('theme-light', isLight);
   if (themeToggleBtn) themeToggleBtn.textContent = isLight ? 'Modo oscuro' : 'Modo claro';
 }
 function loadTheme() {
-  const saved = localStorage.getItem(THEME_KEY);
-  if (saved === 'light' || saved === 'dark') { applyTheme(saved); return; }
-  // Usa preferencia del sistema como default
-  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-  applyTheme(prefersLight ? 'light' : 'dark');
+  const saved = readStoredTheme();
+  if (saved === 'light' || saved === 'dark') {
+    applyTheme(saved);
+    return;
+  }
+  applyTheme('dark');
+  writeStoredTheme('dark');
 }
 if (themeToggleBtn) {
   themeToggleBtn.addEventListener('click', () => {
     const isLight = document.body.classList.contains('theme-light');
     const next = isLight ? 'dark' : 'light';
     applyTheme(next);
-    try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
+    writeStoredTheme(next);
     // Recolorear y redibujar
     reindexRows();
     recalcEdgebanding();

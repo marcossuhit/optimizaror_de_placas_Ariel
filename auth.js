@@ -9,9 +9,9 @@
   window.GOOGLE_REDIRECT_URI = window.GOOGLE_REDIRECT_URI || `${window.location.origin}/auth-callback.html`;
 
   function storeAuthUser(user) {
-  try {
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-  } catch (_) {}
+  try { sessionStorage.removeItem('cortes_theme_v1'); } catch (_) {}
+  try { localStorage.removeItem('cortes_theme_v1'); } catch (_) {}
+  try { localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user)); } catch (_) {}
   }
 
   function getAuthUser() {
@@ -83,6 +83,8 @@
   function signOut() {
   clearAuthUser();
   try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
+  try { sessionStorage.removeItem('cortes_theme_v1'); } catch (_) {}
+  try { localStorage.removeItem('cortes_theme_v1'); } catch (_) {}
   window.location.replace('login.html');
   }
 

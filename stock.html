@@ -50,6 +50,34 @@
           <button id="clearStockBtn" class="btn danger">Vaciar stock</button>
         </div>
       </section>
+
+      <section class="stock-panel">
+        <h2>Tipos de cubre canto</h2>
+        <form id="edgeForm" class="stock-form">
+          <label>
+            Nombre / acabado
+            <input id="edgeNameInput" type="text" placeholder="Ej: PVC 22mm Roble" required />
+          </label>
+          <label>
+            Valor por metro ($)
+            <input id="edgePriceInput" type="number" min="0" step="0.01" value="0" required />
+          </label>
+          <div class="stock-form-actions">
+            <button type="submit" class="btn primary">Guardar cubre canto</button>
+            <button type="button" id="deleteEdgeBtn" class="btn danger">Eliminar cubre canto</button>
+          </div>
+        </form>
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th>Cubre canto</th>
+              <th>Valor $/m</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="edgeTableBody"></tbody>
+        </table>
+      </section>
     </main>
 
     <script src="auth.js"></script>
