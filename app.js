@@ -2835,8 +2835,10 @@ if (resetAllBtn) {
     } else {
       currentMaterialName = DEFAULT_MATERIAL;
     }
+    const firstRow = makeRow(0);
+    rowsEl.appendChild(firstRow);
     applyPlatesGate();
-    ensureDefaultRows();
+    toggleAddButton();
     resetSummaryUI();
   });
 }
