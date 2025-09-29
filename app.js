@@ -581,22 +581,39 @@ function formatNumber(value, decimals = 2) {
     .replace(/(\.\d*?)0+$/, '$1');
 }
 
-function getPlates() {
-  const list = [];
-  if (!platesEl) return list;
+function parsePlateRow(row) {
+  if (!row) return null;
+  const sw = parseFloat(row.querySelector('input.plate-w')?.value ?? '');
+  const sh = parseFloat(row.querySelector('input.plate-h')?.value ?? '');
+  const sc = parseInt(row.querySelector('input.plate-c')?.value ?? '', 10);
+  const tmm = parseInt(row.querySelector('input.trim-mm')?.value ?? '0', 10) || 0;
+  const sides = row.querySelectorAll('.trim-controls .side input');
+  const top = !!sides[0]?.checked;
+  const right = !!sides[1]?.checked;
+  const bottom = !!sides[2]?.checked;
+  const left = !!sides[3]?.checked;
+  if (!(sw > 0 && sh > 0 && sc >= 1)) return null;
+  return {
+    sw,
+    sh,
+    sc,
+    trim: { mm: tmm, top, right, bottom, left },
+    rowEl: row
+  };
+}
+
+function getPlateRowsWithRefs() {
+  const rows = [];
+  if (!platesEl) return rows;
   platesEl.querySelectorAll('.plate-row').forEach((row) => {
-    const sw = parseFloat(row.querySelector('input.plate-w')?.value ?? '');
-    const sh = parseFloat(row.querySelector('input.plate-h')?.value ?? '');
-    const sc = parseInt(row.querySelector('input.plate-c')?.value ?? '', 10);
-    const tmm = parseInt(row.querySelector('input.trim-mm')?.value ?? '0', 10) || 0;
-    const sides = row.querySelectorAll('.trim-controls .side input');
-    const top = !!sides[0]?.checked;
-    const right = !!sides[1]?.checked;
-    const bottom = !!sides[2]?.checked;
-    const left = !!sides[3]?.checked;
-    if (sw > 0 && sh > 0 && sc >= 1) list.push({ sw, sh, sc, trim: { mm: tmm, top, right, bottom, left } });
+    const parsed = parsePlateRow(row);
+    if (parsed) rows.push(parsed);
   });
-  return list;
+  return rows;
+}
+
+function getPlates() {
+  return getPlateRowsWithRefs().map(({ rowEl, ...rest }) => rest);
 }
 
 function getPrimaryPlateDims() {
@@ -644,13 +661,15 @@ function dimensionKeyNormalized(wVal, hVal) {
 }
 
 function collectSolverInputs() {
-  const plates = getPlates();
-  if (!plates.length) return null;
+  const plateRows = getPlateRowsWithRefs();
+  if (!plateRows.length) return null;
 
   const instances = [];
-  plates.forEach((p) => {
+  const instanceMeta = [];
+  plateRows.forEach((p, plateRowIdx) => {
     for (let i = 0; i < p.sc; i++) {
       instances.push({ sw: p.sw, sh: p.sh, trim: p.trim || { mm: 0, top: false, right: false, bottom: false, left: false } });
+      instanceMeta.push({ plateRowIdx });
     }
   });
 
@@ -690,10 +709,76 @@ function collectSolverInputs() {
 
   return {
     instances,
+    instanceMeta,
+    plateRows,
     pieces,
     totalRequested,
     allowAutoRotate,
     kerf
+  };
+}
+
+function reducePlateUsageIfPossible({ instances, instanceMeta, plateRows, initialSolution, initialPieces, runSolver }) {
+  if (!Array.isArray(instances) || instances.length <= 1) return null;
+  if (!Array.isArray(instanceMeta) || instanceMeta.length !== instances.length) return null;
+  if (!Array.isArray(plateRows) || !plateRows.length) return null;
+
+  let workingInstances = instances.slice();
+  let workingMeta = instanceMeta.slice();
+  let workingSolution = initialSolution;
+  let workingPieces = initialPieces;
+  const rowUsage = plateRows.map((row) => Math.max(0, Number.isFinite(row?.sc) ? row.sc : 0));
+  let improved = false;
+
+  while (workingInstances.length > 1) {
+    const removalIdx = workingMeta.length - 1;
+    if (removalIdx < 0) break;
+    const removedMeta = workingMeta[removalIdx];
+    const candidateInstances = workingInstances.slice(0, -1);
+    const attempt = runSolver(candidateInstances, workingPieces);
+    if (attempt.solution.leftovers.length) break;
+
+    const rowIdx = removedMeta?.plateRowIdx;
+    if (rowIdx != null && rowIdx >= 0 && rowIdx < rowUsage.length) {
+      rowUsage[rowIdx] = Math.max(0, rowUsage[rowIdx] - 1);
+    }
+
+    workingInstances = candidateInstances;
+    workingMeta = workingMeta.slice(0, -1);
+    workingSolution = attempt.solution;
+    workingPieces = attempt.pieces;
+    improved = true;
+  }
+
+  if (!improved) return null;
+
+  const usageCounts = new Map();
+  workingMeta.forEach((meta) => {
+    const idx = meta?.plateRowIdx ?? 0;
+    usageCounts.set(idx, (usageCounts.get(idx) || 0) + 1);
+  });
+
+  plateRows.forEach((row, idx) => {
+    const used = usageCounts.has(idx) ? usageCounts.get(idx) : 0;
+    const target = Math.max(1, Math.max(used, rowUsage[idx] || 0));
+    row.sc = target;
+    if (row.rowEl) {
+      const input = row.rowEl.querySelector('input.plate-c');
+      if (input) {
+        const currentVal = parseInt(input.value, 10);
+        if (!Number.isFinite(currentVal) || currentVal !== target) {
+          input.value = String(target);
+        }
+      }
+    }
+  });
+
+  return {
+    instances: workingInstances,
+    instanceMeta: workingMeta,
+    solution: workingSolution,
+    pieces: workingPieces,
+    plateUsage: usageCounts
   };
 }
 
@@ -1146,7 +1231,7 @@ function solveCutLayoutInternal() {
   const inputs = collectSolverInputs();
   if (!inputs) return null;
 
-  const { instances, pieces, totalRequested, allowAutoRotate, kerf } = inputs;
+  let { instances, instanceMeta, plateRows, pieces, totalRequested, allowAutoRotate, kerf } = inputs;
   const computeLeftoverArea = (leftovers) => leftovers.reduce((acc, p) => acc + (p.rawW * p.rawH), 0);
   const clonePieces = (src) => src.map(piece => ({ ...piece }));
   const runSolverWithFallback = (instSubset, pieceSource) => {
@@ -1220,6 +1305,21 @@ function solveCutLayoutInternal() {
         }
       }
     }
+  }
+
+  const reduced = reducePlateUsageIfPossible({
+    instances,
+    instanceMeta,
+    plateRows,
+    initialSolution: solution,
+    initialPieces: solverPieces,
+    runSolver: runSolverWithFallback
+  });
+  if (reduced) {
+    instances = reduced.instances;
+    instanceMeta = reduced.instanceMeta;
+    solution = reduced.solution;
+    solverPieces = reduced.pieces;
   }
 
   const leftoverGroups = groupLeftoverPieces(solution.leftovers);
