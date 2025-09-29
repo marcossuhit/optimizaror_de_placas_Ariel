@@ -54,6 +54,12 @@ try {
 }
 const STOCK_STORAGE_KEY = 'stock_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
+let lastFetchedStockItems = [];
+let lastFeasibleStateSnapshot = null;
+let autoPlateAllocationInProgress = false;
+let pendingAutoPlateAllocation = false;
+let lastStockAlertTs = 0;
+const STOCK_ALERT_COOLDOWN_MS = 1500;
 
 function resetSummaryUI() {
   lastEdgebandByRow.clear();
@@ -201,6 +207,172 @@ async function fetchStockItems() {
   return loadStockFromText();
 }
 
+function getMaterialStockQuantity(material) {
+  if (!material) return null;
+  if (!Array.isArray(lastFetchedStockItems) || !lastFetchedStockItems.length) return null;
+  const normalized = material.toLocaleLowerCase();
+  const match = lastFetchedStockItems.find((item) => (item.material || '').toLocaleLowerCase() === normalized);
+  if (!match) return 0;
+  const qty = Number.parseInt(match.quantity, 10);
+  return Number.isFinite(qty) ? qty : 0;
+}
+
+function countCurrentPlates() {
+  return getPlates().reduce((acc, plate) => acc + (Number.isFinite(plate.sc) ? plate.sc : 0), 0);
+}
+
+function getPrimaryPlateRow() {
+  if (!platesEl) return null;
+  return platesEl.querySelector('.plate-row');
+}
+
+function getPlateRowQuantity(row) {
+  if (!row) return 0;
+  const input = row.querySelector('input.plate-c');
+  const num = parseInt(input?.value ?? '', 10);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function setPlateRowQuantity(row, value) {
+  if (!row) return false;
+  const input = row.querySelector('input.plate-c');
+  if (!input) return false;
+  const next = Math.max(1, Math.round(value));
+  input.value = String(next);
+  return true;
+}
+
+function adjustPlateRowQuantity(row, delta) {
+  const current = getPlateRowQuantity(row);
+  return setPlateRowQuantity(row, current + delta);
+}
+
+function leftoverPiecesFitAnyPlate(pieces, instances) {
+  if (!Array.isArray(pieces) || !pieces.length || !Array.isArray(instances) || !instances.length) return false;
+  return pieces.every((piece) => {
+    const pw = Number(piece?.rawW) || 0;
+    const ph = Number(piece?.rawH) || 0;
+    return instances.some((inst) => {
+      if (!inst) return false;
+      const trim = inst.trim || { mm: 0, top: false, right: false, bottom: false, left: false };
+      const trimValue = Math.max(0, trim.mm || 0);
+      const leftTrim = trim.left ? trimValue : 0;
+      const rightTrim = trim.right ? trimValue : 0;
+      const topTrim = trim.top ? trimValue : 0;
+      const bottomTrim = trim.bottom ? trimValue : 0;
+      const usableW = Math.max(0, inst.sw - leftTrim - rightTrim);
+      const usableH = Math.max(0, inst.sh - topTrim - bottomTrim);
+      if (!(usableW > 0 && usableH > 0)) return false;
+      const fitsDirect = pw <= usableW + PACKING_EPSILON && ph <= usableH + PACKING_EPSILON;
+      const fitsRotated = ph <= usableW + PACKING_EPSILON && pw <= usableH + PACKING_EPSILON;
+      return fitsDirect || fitsRotated;
+    });
+  });
+}
+
+function captureFeasibleState() {
+  try {
+    const snapshot = serializeState();
+    lastFeasibleStateSnapshot = JSON.stringify(snapshot);
+  } catch (_) {
+    // ignore
+  }
+}
+
+function removeLastRowIfAny() {
+  const rows = getRows();
+  if (!rows.length) return;
+  rows[rows.length - 1].remove();
+}
+
+function revertToLastFeasibleState() {
+  if (lastFeasibleStateSnapshot) {
+    try {
+      const parsed = JSON.parse(lastFeasibleStateSnapshot);
+      loadState(parsed);
+      return;
+    } catch (_) {
+      // fall through to fallback logic
+    }
+  }
+  removeLastRowIfAny();
+  applyPlatesGate();
+}
+
+function showLimitedStockAlert(material) {
+  if (Date.now() - lastStockAlertTs < STOCK_ALERT_COOLDOWN_MS) return;
+  const name = material || DEFAULT_MATERIAL;
+  alert(`No hay stock disponible para agregar otra placa de "${name}". El corte no se agregó.`);
+  lastStockAlertTs = Date.now();
+}
+
+function showPieceDoesNotFitAlert() {
+  alert('El corte ingresado no cabe en la placa seleccionada. Ajustá las dimensiones o el material.');
+}
+
+function scheduleAutoPlateCheck() {
+  if (pendingAutoPlateAllocation || autoPlateAllocationInProgress) return;
+  pendingAutoPlateAllocation = true;
+  requestAnimationFrame(() => {
+    pendingAutoPlateAllocation = false;
+    ensurePlateCapacity();
+  });
+}
+
+function ensurePlateCapacity() {
+  if (autoPlateAllocationInProgress) return;
+  autoPlateAllocationInProgress = true;
+  try {
+    let solution = solveCutLayoutInternal();
+    if (!solution || !Array.isArray(solution.leftoverPieces) || !solution.leftoverPieces.length) return;
+    const primaryRow = getPrimaryPlateRow();
+    if (!primaryRow) return;
+    const material = currentMaterialName || DEFAULT_MATERIAL;
+    const stockQty = getMaterialStockQuantity(material);
+    const totalPlates = countCurrentPlates();
+    const initialLeftover = solution.leftoverPieces.length;
+    const maxAdditional = Number.isFinite(stockQty) ? Math.max(0, stockQty - totalPlates) : initialLeftover;
+    if (maxAdditional <= 0) {
+      showLimitedStockAlert(material);
+      revertToLastFeasibleState();
+      return;
+    }
+    const initialQty = getPlateRowQuantity(primaryRow);
+    let added = 0;
+    let stalled = false;
+    let previousLeftover = initialLeftover;
+    while (solution.leftoverPieces.length && added < maxAdditional) {
+      if (!adjustPlateRowQuantity(primaryRow, 1)) break;
+      added += 1;
+      const updated = solveCutLayoutInternal();
+      if (!updated) break;
+      const currentLeftover = Array.isArray(updated.leftoverPieces) ? updated.leftoverPieces.length : 0;
+      if (currentLeftover >= previousLeftover) {
+        solution = updated;
+        stalled = true;
+        break;
+      }
+      solution = updated;
+      previousLeftover = currentLeftover;
+    }
+    if (solution.leftoverPieces.length) {
+      setPlateRowQuantity(primaryRow, initialQty);
+      if (stalled && !leftoverPiecesFitAnyPlate(solution.leftoverPieces, solution.instances)) {
+        showPieceDoesNotFitAlert();
+      } else {
+        showLimitedStockAlert(material);
+      }
+      revertToLastFeasibleState();
+      return;
+    }
+    if (added > 0) {
+      applyPlatesGate();
+    }
+  } finally {
+    autoPlateAllocationInProgress = false;
+  }
+}
+
 function loadEdgeCatalog() {
   try {
     const raw = localStorage.getItem(EDGE_STORAGE_KEY);
@@ -319,10 +491,16 @@ function rebuildMaterialOptions(names, { placeholder = false } = {}) {
 async function refreshMaterialOptions() {
   if (!plateMaterialSelect) return;
   const items = await fetchStockItems();
-  const available = items.filter((item) => {
-    const qty = Number(item?.quantity);
-    return Number.isFinite(qty) && qty > 0;
-  });
+  const normalized = Array.isArray(items)
+    ? items
+        .map((item) => ({
+          material: String(item?.material || '').trim(),
+          quantity: Number.parseInt(item?.quantity, 10) || 0
+        }))
+        .filter((item) => item.material)
+    : [];
+  lastFetchedStockItems = normalized;
+  const available = normalized.filter((item) => Number.isFinite(item.quantity) && item.quantity > 0);
   const namesMap = new Map();
   available.forEach((item) => {
     const material = (item?.material || '').trim();
@@ -2682,12 +2860,19 @@ function renderSheetOverview() {
   sheetCanvasEl.innerHTML = '';
   const solution = solveCutLayoutInternal();
   if (!solution) {
+    captureFeasibleState();
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent = 'Configure la placa para ver la vista';
     sheetCanvasEl.appendChild(hint);
     resetSummaryUI();
     return;
+  }
+
+  if (Array.isArray(solution.leftoverPieces) && solution.leftoverPieces.length) {
+    scheduleAutoPlateCheck();
+  } else {
+    captureFeasibleState();
   }
 
   const {
