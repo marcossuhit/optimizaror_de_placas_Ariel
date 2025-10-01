@@ -60,14 +60,10 @@
               <label class="plate-material">
                 <span>Material</span>
                 <select id="plateMaterialSelect">
-                  <option value="MDF Blanco" selected>MDF Blanco</option>
+                  <option value="">Seleccione</option>
                 </select>
               </label>
               <span class="limit-note">Agrega una o más placas (ancho, alto, cantidad)</span>
-              <div class="field kerf-field">
-                <label for="kerfInput">Desp. de Sierra (mm)</label>
-                <input id="kerfInput" type="number" value="0" min="0" step="1" />
-              </div>
             </div>
             <div id="plates" class="plates"></div>
           </section>
@@ -94,6 +90,8 @@
         <aside class="summary" id="summaryPanel">
           <h2 class="summary-title">Resumen</h2>
           <div id="summaryPieces" class="summary-stat">Piezas colocadas: 0</div>
+          <div id="summaryPlates" class="summary-stat">Placas utilizadas: 0</div>
+          <div id="summaryPlateCost" class="summary-stat" style="display:none;">Costo placas: $0</div>
           <div id="summaryArea" class="summary-stat">Área utilizada: 0 m²</div>
           <div id="summaryUtil" class="summary-stat">Aprovechamiento: 0%</div>
           <div id="summaryWaste" class="summary-stat">Desperdicio: 0 m² (0%)</div>
@@ -103,6 +101,37 @@
           <h3 class="summary-subtitle">Filas</h3>
           <ul id="summaryList" class="summary-list"></ul>
           <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 mm</div>
+
+          <section class="social-connect" aria-labelledby="socialConnectTitle">
+            <h3 id="socialConnectTitle" class="panel-title">Conectá con nuestras redes</h3>
+            <p class="panel-description">Seguinos para conocer lanzamientos, promociones y novedades en tiempo real.</p>
+            <ul class="social-links">
+              <li>
+                <a id="whatsAppLink" href="https://wa.me/542494605850?text=Fernando%20te%20envio%20la%20planificacion%20de%20cortes." target="_blank" rel="noopener noreferrer">
+                  <span class="social-icon social-icon--whatsapp" aria-hidden="true" data-icon="WA"></span>
+                  <span class="social-label">WhatsApp</span>
+                </a>
+              </li>
+              <li>
+                <a href="https://www.instagram.com" target="_blank" rel="noopener noreferrer">
+                  <span class="social-icon social-icon--instagram" aria-hidden="true" data-icon="IG"></span>
+                  <span class="social-label">Instagram</span>
+                </a>
+              </li>
+              <li>
+                <a href="https://www.facebook.com" target="_blank" rel="noopener noreferrer">
+                  <span class="social-icon social-icon--facebook" aria-hidden="true" data-icon="f"></span>
+                  <span class="social-label">Facebook</span>
+                </a>
+              </li>
+              <li>
+                <a href="https://www.youtube.com" target="_blank" rel="noopener noreferrer">
+                  <span class="social-icon social-icon--youtube" aria-hidden="true" data-icon="YT"></span>
+                  <span class="social-label">YouTube</span>
+                </a>
+              </li>
+            </ul>
+          </section>
         </aside>
       </div>
 
@@ -133,10 +162,11 @@
           </div>
         </div>
       </section>
+
     </main>
 
-    
-
+    <script src="stock-sync-config.js"></script>
+    <script src="stock-sync.js"></script>
     <script src="auth.js"></script>
     <script src="app.js"></script>
   </body>

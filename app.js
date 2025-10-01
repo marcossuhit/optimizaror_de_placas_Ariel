@@ -13,14 +13,24 @@ const autoRotateToggle = document.getElementById('autoRotateToggle');
 const plateMaterialSelect = document.getElementById('plateMaterialSelect');
 const manageStockBtn = document.getElementById('manageStockBtn');
 const themeToggleBtn = document.getElementById('themeToggle');
+const stackSection = document.querySelector('.stack');
+const platesControlsEl = document.querySelector('.plates-controls');
+const plateLimitNoteEl = platesControlsEl?.querySelector('.limit-note') || null;
+const rowsSectionEl = document.getElementById('rows');
+const rowsHeaderSection = document.querySelector('.rows-header');
 // Placas dinámicas (lista)
 const platesEl = document.getElementById('plates');
 const addPlateBtn = document.getElementById('addPlateBtn');
-const kerfInput = document.getElementById('kerfInput');
+let kerfInput = document.getElementById('kerfInput');
+let kerfFieldWrapper = kerfInput ? kerfInput.closest('.kerf-field') : null;
+let pendingKerfValue = kerfInput ? kerfInput.value : '0';
 const summaryTotalEl = document.getElementById('summaryTotal');
 const summaryListEl = document.getElementById('summaryList');
 const sheetCanvasEl = document.getElementById('sheetCanvas');
+const sheetOverviewSection = document.querySelector('.sheet-overview');
 const summaryPiecesEl = document.getElementById('summaryPieces');
+const summaryPlatesEl = document.getElementById('summaryPlates');
+const summaryPlateCostEl = document.getElementById('summaryPlateCost');
 const summaryAreaEl = document.getElementById('summaryArea');
 const summaryWasteEl = document.getElementById('summaryWaste');
 const summaryUtilEl = document.getElementById('summaryUtil');
@@ -33,8 +43,15 @@ const userEmailEl = document.getElementById('userEmail');
 const userAvatarEl = document.getElementById('userAvatar');
 const signOutBtn = document.getElementById('signOutBtn');
 const sendCutsBtn = document.getElementById('sendCutsBtn');
+const whatsappLink = document.getElementById('whatsAppLink');
+const WHATSAPP_NUMBER = '542494605850';
+const WHATSAPP_MESSAGE = 'Fernando te envio la planificacion de cortes.';
 const sendCutsDefaultLabel = sendCutsBtn?.textContent || 'Enviar cortes';
 const ALLOWED_ADMIN_EMAILS = new Set(['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com']);
+const StockSync = window.StockSync || null;
+const REMOTE_STOCK_SYNC_ENABLED = !!(StockSync && typeof StockSync.isConfigured === 'function' && StockSync.isConfigured());
+const DEFAULT_PLATE_WIDTH = 2750;
+const DEFAULT_PLATE_HEIGHT = 1830;
 
 const LS_KEY = 'cortes_proyecto_v1';
 const DEFAULT_MATERIAL = 'MDF Blanco';
@@ -48,9 +65,9 @@ let lastEdgebandByRow = new Map(); // rowIdx -> mm subtotal
 let lastPlacementByRow = new Map(); // rowIdx -> { requested, placed, left }
 let currentMaterialName;
 try {
-  currentMaterialName = localStorage.getItem(LAST_MATERIAL_KEY) || plateMaterialSelect?.value || DEFAULT_MATERIAL;
+  currentMaterialName = localStorage.getItem(LAST_MATERIAL_KEY) || plateMaterialSelect?.value || '';
 } catch (_) {
-  currentMaterialName = plateMaterialSelect?.value || DEFAULT_MATERIAL;
+  currentMaterialName = plateMaterialSelect?.value || '';
 }
 const STOCK_STORAGE_KEY = 'stock_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
@@ -60,6 +77,56 @@ let autoPlateAllocationInProgress = false;
 let pendingAutoPlateAllocation = false;
 let lastStockAlertTs = 0;
 const STOCK_ALERT_COOLDOWN_MS = 1500;
+let remoteStockSnapshot = null;
+let remoteEdgeSnapshot = null;
+let lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: '' };
+let lastEdgeCostSummary = { totalMeters: 0, totalCost: 0, entries: [] };
+
+function normalizeStockEntries(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      material: String(item?.material || '').trim(),
+      price: Number.parseFloat(item?.price ?? item?.pricePerUnit ?? item?.pricePerPlate) || 0
+    }))
+    .filter((item) => item.material)
+    .map((item) => ({ material: item.material, price: item.price >= 0 ? item.price : 0 }))
+    .sort((a, b) => a.material.localeCompare(b.material, undefined, { sensitivity: 'base' }));
+}
+
+function normalizeEdgeEntries(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      name: String(item?.name || '').trim(),
+      pricePerMeter: Number.parseFloat(item?.pricePerMeter) || 0
+    }))
+    .filter((item) => item.name)
+    .map((item) => ({ name: item.name, pricePerMeter: item.pricePerMeter >= 0 ? item.pricePerMeter : 0 }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+function stockEntriesEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].material !== b[i].material || a[i].price !== b[i].price) return false;
+  }
+  return true;
+}
+
+function edgeEntriesEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].name !== b[i].name || a[i].pricePerMeter !== b[i].pricePerMeter) return false;
+  }
+  return true;
+}
+let remoteStockUnsubscribe = null;
+let remoteEdgeUnsubscribe = null;
 
 function resetSummaryUI() {
   lastEdgebandByRow.clear();
@@ -68,6 +135,8 @@ function resetSummaryUI() {
   if (summaryReqEl) summaryReqEl.textContent = '';
   if (summaryPlacedEl) summaryPlacedEl.textContent = '';
   if (summaryLeftEl) summaryLeftEl.textContent = '';
+  if (summaryPlatesEl) summaryPlatesEl.textContent = '';
+  if (summaryPlateCostEl) summaryPlateCostEl.textContent = '';
   if (summaryAreaEl) summaryAreaEl.textContent = '';
   if (summaryWasteEl) summaryWasteEl.textContent = '';
   if (summaryUtilEl) summaryUtilEl.textContent = '';
@@ -121,6 +190,87 @@ const isBackofficeAllowed = !!(authUser && ALLOWED_ADMIN_EMAILS.has((authUser.em
 if (manageStockBtn && !isBackofficeAllowed) {
   manageStockBtn.style.display = 'none';
 }
+if (!isBackofficeAllowed) {
+  if (exportPdfBtn) exportPdfBtn.style.display = 'none';
+  if (sheetOverviewSection) sheetOverviewSection.style.display = 'none';
+  if (stackSection) stackSection.style.display = '';
+  if (platesEl) platesEl.style.display = '';
+  if (rowsSectionEl) rowsSectionEl.style.display = '';
+  if (rowsHeaderSection) rowsHeaderSection.style.display = '';
+  if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
+  if (addPlateBtn) {
+    updateMaterialDropdownState();
+  }
+} else {
+  if (sheetOverviewSection) sheetOverviewSection.style.display = '';
+  if (stackSection) stackSection.style.display = '';
+  if (platesEl) platesEl.style.display = '';
+  if (rowsSectionEl) rowsSectionEl.style.display = '';
+  if (rowsHeaderSection) rowsHeaderSection.style.display = '';
+  if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
+  if (addPlateBtn) {
+    addPlateBtn.disabled = false;
+    addPlateBtn.classList.remove('disabled-btn');
+  }
+}
+
+function handleRemoteStockUpdate(items) {
+  const normalized = normalizeStockEntries(items);
+  const changed = !stockEntriesEqual(remoteStockSnapshot || [], normalized);
+  remoteStockSnapshot = normalized.slice();
+  if (isBackofficeAllowed) {
+    try { localStorage.setItem(STOCK_STORAGE_KEY, JSON.stringify(normalized)); } catch (_) {}
+  }
+  if (changed || !lastFetchedStockItems.length) {
+    refreshMaterialOptions(normalized);
+  } else {
+    lastFetchedStockItems = normalized.slice();
+  }
+}
+
+function handleRemoteEdgeUpdate(items) {
+  const normalized = normalizeEdgeEntries(items);
+  const changed = !edgeEntriesEqual(remoteEdgeSnapshot || [], normalized);
+  remoteEdgeSnapshot = normalized.slice();
+  if (changed || !edgeCatalog.length) {
+    refreshEdgeCatalog({ catalog: normalized });
+  }
+  if (isBackofficeAllowed) {
+    try { localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(normalized)); } catch (_) {}
+  }
+}
+
+function initRemoteSynchronisation() {
+  if (!REMOTE_STOCK_SYNC_ENABLED) return;
+  try {
+    StockSync.ensureReady?.();
+    if (isBackofficeAllowed && typeof StockSync.requiresAuth === 'function' && StockSync.requiresAuth() && typeof StockSync.ensureFirebaseAuth === 'function') {
+      StockSync.ensureFirebaseAuth();
+    }
+  } catch (_) {}
+  if (typeof remoteStockUnsubscribe === 'function') remoteStockUnsubscribe();
+  if (typeof remoteEdgeUnsubscribe === 'function') remoteEdgeUnsubscribe();
+  remoteStockUnsubscribe = StockSync.watchStock(handleRemoteStockUpdate);
+  remoteEdgeUnsubscribe = StockSync.watchEdges(handleRemoteEdgeUpdate);
+  window.addEventListener('beforeunload', () => {
+    if (typeof remoteStockUnsubscribe === 'function') remoteStockUnsubscribe();
+    if (typeof remoteEdgeUnsubscribe === 'function') remoteEdgeUnsubscribe();
+  }, { once: true });
+  if (typeof StockSync.getStockSnapshot === 'function') {
+    StockSync.getStockSnapshot().then((items) => {
+      if (Array.isArray(items)) handleRemoteStockUpdate(items);
+    }).catch((err) => {
+      console.error('App: error obteniendo snapshot inicial de stock', err);
+    });
+  }
+  if (typeof StockSync.getEdgeSnapshot === 'function') {
+    StockSync.getEdgeSnapshot().then((items) => {
+      if (Array.isArray(items) && items.length) handleRemoteEdgeUpdate(items);
+    }).catch((err) => {
+      console.error('App: error obteniendo snapshot inicial de cubre cantos', err);
+    });
+  }
+}
 
 function updateRowSummaryUI() {
   if (!summaryListEl) return;
@@ -171,10 +321,10 @@ function parseStockText(text) {
   text.split('\n').forEach((line) => {
     const clean = line.trim();
     if (!clean || clean.startsWith('#')) return;
-    const [materialPart, qtyPart] = clean.split('|').map((part) => (part ?? '').trim());
+    const [materialPart, pricePart] = clean.split('|').map((part) => (part ?? '').trim());
     if (!materialPart) return;
-    const qty = Number.parseInt(qtyPart, 10);
-    rows.push({ material: materialPart, quantity: Number.isFinite(qty) ? qty : 0 });
+    const price = Number.parseFloat(pricePart);
+    rows.push({ material: materialPart, price: Number.isFinite(price) ? price : 0 });
   });
   return rows;
 }
@@ -185,7 +335,7 @@ function loadStockFromStorage() {
     const raw = localStorage.getItem(STOCK_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed)) return normalizeStockEntries(parsed);
   } catch (_) {}
   return null;
 }
@@ -195,26 +345,46 @@ async function loadStockFromText() {
     const response = await fetch(STOCK_TEXT_FALLBACK, { cache: 'no-store' });
     if (!response.ok) return [];
     const text = await response.text();
-    return parseStockText(text);
+    return normalizeStockEntries(parseStockText(text));
   } catch (_) {
     return [];
   }
 }
 
 async function fetchStockItems() {
+  if (REMOTE_STOCK_SYNC_ENABLED) {
+    if (Array.isArray(remoteStockSnapshot)) {
+      lastFetchedStockItems = remoteStockSnapshot.slice();
+      return lastFetchedStockItems;
+    }
+    try {
+      const remote = await StockSync.getStockSnapshot();
+      remoteStockSnapshot = normalizeStockEntries(remote);
+      lastFetchedStockItems = remoteStockSnapshot.slice();
+      return lastFetchedStockItems;
+    } catch (err) {
+      console.error('App: no se pudo obtener stock remoto, usando respaldo local', err);
+    }
+  }
   const fromStorage = loadStockFromStorage();
   if (fromStorage && fromStorage.length) return fromStorage;
-  return loadStockFromText();
+  const fallback = await loadStockFromText();
+  lastFetchedStockItems = fallback.slice();
+  return fallback;
 }
 
 function getMaterialStockQuantity(material) {
-  if (!material) return null;
-  if (!Array.isArray(lastFetchedStockItems) || !lastFetchedStockItems.length) return null;
+  return Number.POSITIVE_INFINITY;
+}
+
+function getMaterialPrice(material) {
+  if (!material) return 0;
+  if (!Array.isArray(lastFetchedStockItems) || !lastFetchedStockItems.length) return 0;
   const normalized = material.toLocaleLowerCase();
   const match = lastFetchedStockItems.find((item) => (item.material || '').toLocaleLowerCase() === normalized);
   if (!match) return 0;
-  const qty = Number.parseInt(match.quantity, 10);
-  return Number.isFinite(qty) ? qty : 0;
+  const price = Number.parseFloat(match.price);
+  return Number.isFinite(price) ? price : 0;
 }
 
 function countCurrentPlates() {
@@ -329,12 +499,15 @@ function ensurePlateCapacity() {
     if (!primaryRow) return;
     const material = currentMaterialName || DEFAULT_MATERIAL;
     const stockQty = getMaterialStockQuantity(material);
+    const limitedByStock = Number.isFinite(stockQty) && stockQty !== Number.POSITIVE_INFINITY;
     const totalPlates = countCurrentPlates();
     const initialLeftover = solution.leftoverPieces.length;
-    const maxAdditional = Number.isFinite(stockQty) ? Math.max(0, stockQty - totalPlates) : initialLeftover;
+    const maxAdditional = limitedByStock ? Math.max(0, stockQty - totalPlates) : initialLeftover;
     if (maxAdditional <= 0) {
-      showLimitedStockAlert(material);
-      revertToLastFeasibleState();
+      if (limitedByStock) {
+        showLimitedStockAlert(material);
+        revertToLastFeasibleState();
+      }
       return;
     }
     const initialQty = getPlateRowQuantity(primaryRow);
@@ -359,7 +532,7 @@ function ensurePlateCapacity() {
       setPlateRowQuantity(primaryRow, initialQty);
       if (stalled && !leftoverPiecesFitAnyPlate(solution.leftoverPieces, solution.instances)) {
         showPieceDoesNotFitAlert();
-      } else {
+      } else if (limitedByStock) {
         showLimitedStockAlert(material);
       }
       revertToLastFeasibleState();
@@ -374,17 +547,15 @@ function ensurePlateCapacity() {
 }
 
 function loadEdgeCatalog() {
+  if (REMOTE_STOCK_SYNC_ENABLED && Array.isArray(remoteEdgeSnapshot)) {
+    return remoteEdgeSnapshot.slice();
+  }
   try {
     const raw = localStorage.getItem(EDGE_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => ({
-        name: String(item?.name || '').trim(),
-        pricePerMeter: Number.parseFloat(item?.pricePerMeter) || 0
-      }))
-      .filter((item) => item.name);
+    return normalizeEdgeEntries(parsed);
   } catch (_) {
     return [];
   }
@@ -435,8 +606,9 @@ function populateEdgeSelectOptions(select, selectedValue) {
   }
 }
 
-function refreshEdgeCatalog({ updateRows = true } = {}) {
-  edgeCatalog = loadEdgeCatalog().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+function refreshEdgeCatalog({ updateRows = true, catalog } = {}) {
+  const source = Array.isArray(catalog) ? normalizeEdgeEntries(catalog) : loadEdgeCatalog();
+  edgeCatalog = source.slice();
   if (updateRows) {
     getRows().forEach((row) => {
       if (row._refreshEdgeSelects) row._refreshEdgeSelects();
@@ -447,23 +619,33 @@ function refreshEdgeCatalog({ updateRows = true } = {}) {
 
 refreshEdgeCatalog({ updateRows: false });
 
+function updateMaterialDropdownState() {
+  if (!addPlateBtn || !plateMaterialSelect) return;
+  const hasSelection = !!plateMaterialSelect.value;
+  addPlateBtn.disabled = !hasSelection;
+  addPlateBtn.classList.toggle('disabled-btn', !hasSelection);
+  addPlateBtn.title = hasSelection ? '' : 'Seleccioná un material para agregar placas';
+}
+
 function rebuildMaterialOptions(names, { placeholder = false } = {}) {
   if (!plateMaterialSelect) return;
   const previous = currentMaterialName;
   plateMaterialSelect.innerHTML = '';
+  const placeholderOption = document.createElement('option');
+  placeholderOption.value = '';
+  placeholderOption.textContent = 'Seleccione';
+  placeholderOption.dataset.placeholder = '1';
+  plateMaterialSelect.appendChild(placeholderOption);
   if (!names.length) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = placeholder ? placeholder : 'Agregá materiales en el backoffice';
-    option.disabled = true;
-    option.selected = true;
-    plateMaterialSelect.appendChild(option);
+    placeholderOption.textContent = placeholder ? placeholder : 'Agregá materiales en el backoffice';
     plateMaterialSelect.disabled = true;
     if (currentMaterialName) {
       currentMaterialName = '';
       try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
       applyPlatesGate();
     }
+    plateMaterialSelect.value = '';
+    updateMaterialDropdownState();
     return;
   }
 
@@ -475,32 +657,38 @@ function rebuildMaterialOptions(names, { placeholder = false } = {}) {
     plateMaterialSelect.appendChild(option);
   });
   const findInsensitive = (arr, target) => arr.find(name => name.localeCompare(target, undefined, { sensitivity: 'accent' }) === 0);
-  let nextSelection = findInsensitive(names, DEFAULT_MATERIAL)
-    || (previous ? findInsensitive(names, previous) : undefined)
-    || names[0];
-  plateMaterialSelect.value = nextSelection;
-  if (currentMaterialName !== nextSelection) {
+  let nextSelection = '';
+  if (previous) {
+    nextSelection = findInsensitive(names, previous) || '';
+  }
+  if (!nextSelection) {
+    try {
+      const stored = localStorage.getItem(LAST_MATERIAL_KEY);
+      if (stored) nextSelection = findInsensitive(names, stored) || '';
+    } catch (_) {}
+  }
+  if (!nextSelection && findInsensitive(names, DEFAULT_MATERIAL) && previous === DEFAULT_MATERIAL) {
+    nextSelection = DEFAULT_MATERIAL;
+  }
+  if (nextSelection) {
+    plateMaterialSelect.value = nextSelection;
     currentMaterialName = nextSelection;
     try { localStorage.setItem(LAST_MATERIAL_KEY, currentMaterialName); } catch (_) {}
-    applyPlatesGate();
   } else {
-    currentMaterialName = nextSelection;
+    plateMaterialSelect.value = '';
+    currentMaterialName = '';
+    try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
   }
+  updateMaterialDropdownState();
+  applyPlatesGate();
 }
 
-async function refreshMaterialOptions() {
+async function refreshMaterialOptions(prefetchedItems) {
   if (!plateMaterialSelect) return;
-  const items = await fetchStockItems();
-  const normalized = Array.isArray(items)
-    ? items
-        .map((item) => ({
-          material: String(item?.material || '').trim(),
-          quantity: Number.parseInt(item?.quantity, 10) || 0
-        }))
-        .filter((item) => item.material)
-    : [];
-  lastFetchedStockItems = normalized;
-  const available = normalized.filter((item) => Number.isFinite(item.quantity) && item.quantity > 0);
+  let items = Array.isArray(prefetchedItems) ? prefetchedItems : await fetchStockItems();
+  const normalized = normalizeStockEntries(items);
+  lastFetchedStockItems = normalized.slice();
+  const available = normalized.slice();
   const namesMap = new Map();
   available.forEach((item) => {
     const material = (item?.material || '').trim();
@@ -625,8 +813,42 @@ function isSheetComplete() {
   return getPlates().length > 0;
 }
 
+function toggleActionButtons(isReady) {
+  const setState = (btn, enabled) => {
+    if (!btn) return;
+    if (btn.dataset.busy === '1') return;
+    if (enabled) {
+      btn.disabled = false;
+      btn.classList.remove('disabled-btn');
+    } else {
+      btn.disabled = true;
+      btn.classList.add('disabled-btn');
+    }
+  };
+
+  setState(saveJsonBtn, isReady);
+  setState(exportPdfBtn, isReady && isBackofficeAllowed);
+  if (sendCutsBtn) {
+    if (sendCutsBtn.dataset.busy === '1') return;
+    if (isReady) {
+      sendCutsBtn.disabled = false;
+      sendCutsBtn.classList.remove('disabled-btn');
+      sendCutsBtn.textContent = sendCutsDefaultLabel;
+    } else {
+      sendCutsBtn.disabled = true;
+      sendCutsBtn.classList.add('disabled-btn');
+      sendCutsBtn.textContent = sendCutsDefaultLabel;
+    }
+  }
+}
+
+function buildWhatsappUrl() {
+  const text = encodeURIComponent(WHATSAPP_MESSAGE);
+  return `https://wa.me/${WHATSAPP_NUMBER}?text=${text}`;
+}
+
 function getKerfMm() {
-  const v = parseInt(kerfInput?.value ?? '0', 10);
+  const v = parseInt(kerfInput?.value ?? pendingKerfValue ?? '0', 10);
   if (isNaN(v) || v < 0) return 0;
   // El input ya está en milímetros
   return v;
@@ -2047,7 +2269,8 @@ clearAllBtn.addEventListener('click', () => {
 // Crear filas iniciales si no hay (cuando no hay proyecto guardado)
 function ensureDefaultRows() {
   if (currentRowCount() === 0) {
-    for (let i = 0; i < 5; i++) rowsEl.appendChild(makeRow(i));
+    const initialRows = isBackofficeAllowed ? 5 : 1;
+    for (let i = 0; i < initialRows; i++) rowsEl.appendChild(makeRow(i));
     toggleAddButton();
   }
 }
@@ -2060,18 +2283,86 @@ function refreshAllPreviews() {
   getRows().forEach(r => r._updatePreview && r._updatePreview());
 }
 
-function makePlateRow() {
+function ensureKerfField() {
+  if (!isBackofficeAllowed) return;
+  if (!platesEl) return;
+  const firstRow = platesEl.querySelector('.plate-row');
+  if (!firstRow) return;
+  const kerfSlot = firstRow.querySelector('.kerf-slot');
+  if (!kerfSlot) return;
+
+  if (!kerfInput) {
+    kerfInput = document.createElement('input');
+    kerfInput.id = 'kerfInput';
+    kerfInput.type = 'number';
+    kerfInput.min = '0';
+    kerfInput.step = '1';
+    kerfInput.value = pendingKerfValue != null ? pendingKerfValue : '0';
+  }
+
+  if (!kerfFieldWrapper) {
+    kerfFieldWrapper = document.createElement('div');
+    kerfFieldWrapper.className = 'field kerf-field';
+    const label = document.createElement('label');
+    label.setAttribute('for', 'kerfInput');
+    label.textContent = 'Desp. de Sierra (mm)';
+    kerfFieldWrapper.appendChild(label);
+    kerfFieldWrapper.appendChild(kerfInput);
+  }
+
+  if (!kerfFieldWrapper.contains(kerfInput)) {
+    kerfFieldWrapper.appendChild(kerfInput);
+  }
+
+  if (kerfSlot.firstChild && kerfSlot.firstChild !== kerfFieldWrapper) {
+    kerfSlot.innerHTML = '';
+  }
+  if (kerfFieldWrapper.parentElement !== kerfSlot) {
+    kerfSlot.appendChild(kerfFieldWrapper);
+  }
+
+  if (pendingKerfValue != null) {
+    kerfInput.value = pendingKerfValue;
+  } else if (!kerfInput.value) {
+    kerfInput.value = '0';
+  }
+  pendingKerfValue = kerfInput.value;
+
+  if (!kerfInput._kerfListenerAttached) {
+    kerfInput.addEventListener('input', () => {
+      pendingKerfValue = kerfInput.value;
+      applyPlatesGate();
+    });
+    kerfInput._kerfListenerAttached = true;
+  }
+}
+
+function makePlateRow(options = {}) {
+  const readOnlySize = !!options.readOnlySize;
+  const widthValue = options.width != null ? options.width : (readOnlySize ? DEFAULT_PLATE_WIDTH : '');
+  const heightValue = options.height != null ? options.height : (readOnlySize ? DEFAULT_PLATE_HEIGHT : '');
+
   const row = document.createElement('div');
   row.className = 'plate-row';
 
   const fW = document.createElement('div'); fW.className = 'field';
   const lW = document.createElement('label'); lW.textContent = 'Ancho (mm)';
   const iW = document.createElement('input'); iW.className = 'plate-w'; iW.type = 'number'; iW.min = '0'; iW.step = '1'; iW.placeholder = 'Ej: 2440';
+  if (widthValue !== '') iW.value = String(widthValue);
+  if (readOnlySize) {
+    iW.disabled = true;
+    iW.classList.add('readonly-input');
+  }
   fW.appendChild(lW); fW.appendChild(iW);
 
   const fH = document.createElement('div'); fH.className = 'field';
   const lH = document.createElement('label'); lH.textContent = 'Alto (mm)';
   const iH = document.createElement('input'); iH.className = 'plate-h'; iH.type = 'number'; iH.min = '0'; iH.step = '1'; iH.placeholder = 'Ej: 1220';
+  if (heightValue !== '') iH.value = String(heightValue);
+  if (readOnlySize) {
+    iH.disabled = true;
+    iH.classList.add('readonly-input');
+  }
   fH.appendChild(lH); fH.appendChild(iH);
 
   const fC = document.createElement('div'); fC.className = 'field';
@@ -2098,15 +2389,37 @@ function makePlateRow() {
   trim.appendChild(trimControls);
 
   const del = document.createElement('button'); del.className = 'btn remove'; del.textContent = 'Eliminar';
-  del.addEventListener('click', () => { row.remove(); applyPlatesGate(); });
+  del.addEventListener('click', () => {
+    row.remove();
+    applyPlatesGate();
+    ensureKerfField();
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'plate-actions';
+  actions.appendChild(del);
+
+  const kerfSlot = document.createElement('div');
+  kerfSlot.className = 'kerf-slot';
 
   const onChange = () => { applyPlatesGate(); };
-  iW.addEventListener('input', onChange); iH.addEventListener('input', onChange); iC.addEventListener('input', onChange);
+  iW.addEventListener('input', onChange);
+  iH.addEventListener('input', onChange);
+  iC.addEventListener('input', onChange);
   trimMm.addEventListener('input', onChange);
   [cTop, cRight, cBottom, cLeft].forEach(ch => ch.addEventListener('change', onChange));
 
-  row.appendChild(fW); row.appendChild(fH); row.appendChild(fC); row.appendChild(del);
+  row.appendChild(fW);
+  row.appendChild(fH);
+  row.appendChild(fC);
+  row.appendChild(actions);
   row.appendChild(trim);
+  row.appendChild(kerfSlot);
+
+  if (readOnlySize) {
+    onChange();
+  }
+
   return row;
 }
 
@@ -2121,24 +2434,71 @@ function applyPlatesGate() {
   recalcEdgebanding();
   refreshAllPreviews();
   renderSheetOverview();
+  ensureKerfField();
+  toggleActionButtons(enabled);
   persistState && persistState();
 }
 
+function enforceDefaultPlateSize(row) {
+  if (isBackofficeAllowed || !row) return;
+  const widthInput = row.querySelector('input.plate-w');
+  const heightInput = row.querySelector('input.plate-h');
+  const quantityInput = row.querySelector('input.plate-c');
+  if (widthInput) {
+    widthInput.value = String(DEFAULT_PLATE_WIDTH);
+    widthInput.disabled = true;
+    widthInput.classList.add('readonly-input');
+  }
+  if (heightInput) {
+    heightInput.value = String(DEFAULT_PLATE_HEIGHT);
+    heightInput.disabled = true;
+    heightInput.classList.add('readonly-input');
+  }
+  if (quantityInput) {
+    const sanitized = Math.max(1, parseInt(quantityInput.value, 10) || 1);
+    quantityInput.value = String(sanitized);
+    quantityInput.readOnly = true;
+    quantityInput.classList.add('readonly-input');
+    const quantityFieldWrapper = quantityInput.closest('.field');
+    if (quantityFieldWrapper) {
+      quantityFieldWrapper.style.display = 'none';
+    }
+  }
+}
+
 if (platesEl && addPlateBtn) {
-  addPlateBtn.addEventListener('click', () => { platesEl.appendChild(makePlateRow()); applyPlatesGate(); });
+  const appendPlateRow = () => {
+    const row = makePlateRow(isBackofficeAllowed ? {} : {
+      readOnlySize: true,
+      width: DEFAULT_PLATE_WIDTH,
+      height: DEFAULT_PLATE_HEIGHT
+    });
+    platesEl.appendChild(row);
+    enforceDefaultPlateSize(row);
+    ensureKerfField();
+    applyPlatesGate();
+    return row;
+  };
+
+  addPlateBtn.addEventListener('click', () => {
+    if (!plateMaterialSelect || !plateMaterialSelect.value) return;
+    appendPlateRow();
+  });
   // Intentar cargar desde localStorage; si no hay, crear por defecto
   let loadedFromLS = false;
   try {
     loadedFromLS = tryLoadFromLocalStorage();
   } catch (_) { loadedFromLS = false; }
-  if (!loadedFromLS) {
-    platesEl.appendChild(makePlateRow());
-    applyPlatesGate();
-    ensureDefaultRows();
+  if (!loadedFromLS && isBackofficeAllowed) {
+    if (currentMaterialName) {
+      appendPlateRow();
+    }
   }
-}
-if (kerfInput) kerfInput.addEventListener('input', () => { applyPlatesGate(); });
 
+  ensureDefaultRows();
+}
+
+initRemoteSynchronisation();
 refreshMaterialOptions();
 refreshEdgeCatalog();
 window.addEventListener('focus', () => {
@@ -2149,6 +2509,8 @@ window.addEventListener('storage', (event) => {
   if (event.key === STOCK_STORAGE_KEY) refreshMaterialOptions();
   if (event.key === EDGE_STORAGE_KEY) refreshEdgeCatalog();
 });
+
+toggleActionButtons(isSheetComplete());
 
 // -------- Persistencia (Guardar/Cargar) --------
 function serializeState() {
@@ -2179,9 +2541,9 @@ function serializeState() {
     };
   });
   const name = (projectNameEl?.value || '').trim();
-  const kerfMm = parseInt(kerfInput?.value ?? '0', 10) || 0;
+  const kerfMm = parseInt(kerfInput?.value ?? pendingKerfValue ?? '0', 10) || 0;
   const autoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
-  const material = currentMaterialName || DEFAULT_MATERIAL;
+  const material = currentMaterialName || '';
   return { name, plates, rows, kerfMm, autoRotate, material };
 }
 
@@ -2219,6 +2581,147 @@ function saveJSON() {
 
 function cloneSvgForExport(svgEl) {
   const clone = svgEl.cloneNode(true);
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  const injectPlateDimensions = (targetSvg) => {
+    const outline = targetSvg.querySelector('.sheet-outline');
+    if (!outline) return;
+    const widthMm = parseFloat(targetSvg.getAttribute('data-plate-width-mm') || targetSvg.dataset?.plateWidthMm || '');
+    const heightMm = parseFloat(targetSvg.getAttribute('data-plate-height-mm') || targetSvg.dataset?.plateHeightMm || '');
+    const x = parseFloat(outline.getAttribute('x') || '0');
+    const y = parseFloat(outline.getAttribute('y') || '0');
+    const w = parseFloat(outline.getAttribute('width') || '0');
+    const h = parseFloat(outline.getAttribute('height') || '0');
+    if (![x, y, w, h].every(Number.isFinite)) return;
+    if (w <= 0 || h <= 0) return;
+
+    const offset = 28;
+    const diag = 8;
+    const group = document.createElementNS(svgNS, 'g');
+    group.setAttribute('class', 'export-dimension-guides');
+    group.setAttribute('stroke', '#111827');
+    group.setAttribute('stroke-width', '1');
+    group.setAttribute('fill', 'none');
+    group.setAttribute('stroke-linecap', 'square');
+    targetSvg.appendChild(group);
+
+    const addLine = (x1, y1, x2, y2) => {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      group.appendChild(line);
+    };
+    const addDiag = (x1, y1, x2, y2) => {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      group.appendChild(line);
+    };
+
+    const widthLineY = y + h + offset;
+    addLine(x, y + h, x, widthLineY);
+    addLine(x + w, y + h, x + w, widthLineY);
+    addLine(x, widthLineY, x + w, widthLineY);
+    addDiag(x, widthLineY, x + diag, widthLineY + diag);
+    addDiag(x + w, widthLineY, x + w - diag, widthLineY + diag);
+
+    if (Number.isFinite(widthMm) && widthMm > 0) {
+      const widthText = document.createElementNS(svgNS, 'text');
+      widthText.setAttribute('x', String(x + w / 2));
+      widthText.setAttribute('y', String(widthLineY - 6));
+      widthText.setAttribute('text-anchor', 'middle');
+      widthText.setAttribute('font-size', '14');
+      widthText.setAttribute('font-weight', '600');
+      widthText.setAttribute('fill', '#111827');
+      widthText.setAttribute('stroke', 'none');
+      widthText.setAttribute('pointer-events', 'none');
+      widthText.textContent = `${formatNumber(widthMm, 0)} mm`;
+      targetSvg.appendChild(widthText);
+    }
+
+    const heightLineX = x + w + offset;
+    addLine(x + w, y, heightLineX, y);
+    addLine(x + w, y + h, heightLineX, y + h);
+    addLine(heightLineX, y, heightLineX, y + h);
+    addDiag(heightLineX, y, heightLineX + diag, y + diag);
+    addDiag(heightLineX, y + h, heightLineX + diag, y + h - diag);
+
+    if (Number.isFinite(heightMm) && heightMm > 0) {
+      const heightText = document.createElementNS(svgNS, 'text');
+      heightText.setAttribute('x', String(heightLineX + 10));
+      heightText.setAttribute('y', String(y + h / 2));
+      heightText.setAttribute('text-anchor', 'start');
+      heightText.setAttribute('dominant-baseline', 'middle');
+      heightText.setAttribute('font-size', '14');
+      heightText.setAttribute('font-weight', '600');
+      heightText.setAttribute('fill', '#111827');
+      heightText.setAttribute('stroke', 'none');
+      heightText.setAttribute('pointer-events', 'none');
+      heightText.textContent = `${formatNumber(heightMm, 0)} mm`;
+      targetSvg.appendChild(heightText);
+    }
+  };
+
+  const injectEdgeLabels = (targetSvg) => {
+    const lines = targetSvg.querySelectorAll('.edge-band-line');
+    if (!lines.length) return;
+    lines.forEach((line) => {
+      const name = (line.getAttribute('data-edge-name') || '').trim();
+      if (!name) return;
+      const orientation = (line.getAttribute('data-edge-orientation') || '').trim();
+      const position = (line.getAttribute('data-edge-position') || '').trim();
+      const x1 = parseFloat(line.getAttribute('x1') || '0');
+      const y1 = parseFloat(line.getAttribute('y1') || '0');
+      const x2 = parseFloat(line.getAttribute('x2') || '0');
+      const y2 = parseFloat(line.getAttribute('y2') || '0');
+      if (![x1, y1, x2, y2].every(Number.isFinite)) return;
+
+      const label = document.createElementNS(svgNS, 'text');
+      label.setAttribute('class', 'edge-band-label');
+      label.setAttribute('font-size', '11');
+      label.setAttribute('font-weight', '600');
+      label.setAttribute('fill', '#111827');
+      label.setAttribute('stroke', 'none');
+      label.setAttribute('pointer-events', 'none');
+      label.textContent = name;
+
+      if (orientation === 'horizontal') {
+        const centerX = (x1 + x2) / 2;
+        const baseY = (y1 + y2) / 2;
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('x', String(centerX));
+        label.setAttribute('dominant-baseline', 'middle');
+        if (position === 'top') {
+          label.setAttribute('y', String(baseY + 14));
+        } else {
+          label.setAttribute('y', String(baseY - 14));
+        }
+      } else if (orientation === 'vertical') {
+        const centerY = (y1 + y2) / 2;
+        label.setAttribute('dominant-baseline', 'middle');
+        label.setAttribute('text-anchor', 'middle');
+        if (position === 'left') {
+          const textX = x1 + 12;
+          label.setAttribute('x', String(textX));
+          label.setAttribute('y', String(centerY));
+          label.setAttribute('transform', `rotate(90 ${textX} ${centerY})`);
+        } else {
+          const textX = x1 - 12;
+          label.setAttribute('x', String(textX));
+          label.setAttribute('y', String(centerY));
+          label.setAttribute('transform', `rotate(-90 ${textX} ${centerY})`);
+        }
+      } else {
+        return;
+      }
+
+      targetSvg.appendChild(label);
+    });
+  };
 
   const adjustHeightLabel = (label) => {
     const rawX = parseFloat(label.getAttribute('x') || '0');
@@ -2279,6 +2782,9 @@ function cloneSvgForExport(svgEl) {
     path.setAttribute('stroke', '#11182733');
   });
 
+  injectPlateDimensions(clone);
+  injectEdgeLabels(clone);
+
   return clone;
 }
 
@@ -2294,12 +2800,17 @@ function clearAllRows() {
 
 function clearAllPlates() {
   if (platesEl) platesEl.innerHTML = '';
+  ensureKerfField();
 }
 
 function loadState(state) {
+  if (!isBackofficeAllowed) return;
   clearAllPlates();
   if (projectNameEl && typeof state.name === 'string') projectNameEl.value = state.name;
-  if (kerfInput && typeof state.kerfMm === 'number') kerfInput.value = String(state.kerfMm);
+  if (typeof state.kerfMm === 'number') {
+    pendingKerfValue = String(state.kerfMm);
+    if (kerfInput) kerfInput.value = pendingKerfValue;
+  }
   if (autoRotateToggle) autoRotateToggle.checked = state.autoRotate !== false;
   if (plateMaterialSelect) {
     if (typeof state.material === 'string' && state.material.trim()) {
@@ -2313,10 +2824,17 @@ function loadState(state) {
       }
       plateMaterialSelect.value = materialValue;
       currentMaterialName = materialValue;
+      try { localStorage.setItem(LAST_MATERIAL_KEY, currentMaterialName); } catch (_) {}
     } else {
-      plateMaterialSelect.selectedIndex = 0;
-      currentMaterialName = plateMaterialSelect.value || DEFAULT_MATERIAL;
+      if (plateMaterialSelect.querySelector('option[value=""]')) {
+        plateMaterialSelect.value = '';
+      } else {
+        plateMaterialSelect.selectedIndex = 0;
+      }
+      currentMaterialName = '';
+      try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
     }
+    updateMaterialDropdownState();
   } else {
     currentMaterialName = state.material && typeof state.material === 'string'
       ? state.material
@@ -2325,10 +2843,32 @@ function loadState(state) {
   // Cargar placas
   if (platesEl && Array.isArray(state.plates)) {
     state.plates.forEach(p => {
-      const r = makePlateRow();
-      r.querySelector('input.plate-w').value = String(p.sw || '');
-      r.querySelector('input.plate-h').value = String(p.sh || '');
-      r.querySelector('input.plate-c').value = String(p.sc || 1);
+      const rowOptions = isBackofficeAllowed
+        ? {}
+        : { readOnlySize: true, width: DEFAULT_PLATE_WIDTH, height: DEFAULT_PLATE_HEIGHT };
+      const r = makePlateRow(rowOptions);
+      const widthInput = r.querySelector('input.plate-w');
+      const heightInput = r.querySelector('input.plate-h');
+      const countInput = r.querySelector('input.plate-c');
+      if (widthInput) {
+        if (isBackofficeAllowed) {
+          widthInput.value = String(p.sw || '');
+        } else {
+          widthInput.value = String(DEFAULT_PLATE_WIDTH);
+          widthInput.disabled = true;
+          widthInput.classList.add('readonly-input');
+        }
+      }
+      if (heightInput) {
+        if (isBackofficeAllowed) {
+          heightInput.value = String(p.sh || '');
+        } else {
+          heightInput.value = String(DEFAULT_PLATE_HEIGHT);
+          heightInput.disabled = true;
+          heightInput.classList.add('readonly-input');
+        }
+      }
+      if (countInput) countInput.value = String(p.sc || 1);
       if (p.trim) {
         const tmm = r.querySelector('input.trim-mm');
         if (tmm) tmm.value = String(p.trim.mm || 0);
@@ -2392,6 +2932,7 @@ function loadState(state) {
     });
   }
 
+  ensureKerfField();
   applyPlatesGate();
   persistState();
 }
@@ -2426,11 +2967,20 @@ if (autoRotateToggle) {
 }
 if (plateMaterialSelect) {
   plateMaterialSelect.addEventListener('change', () => {
-    currentMaterialName = plateMaterialSelect.value || DEFAULT_MATERIAL;
-    try { localStorage.setItem(LAST_MATERIAL_KEY, currentMaterialName); } catch (_) {}
+    const value = plateMaterialSelect.value;
+    if (value) {
+      currentMaterialName = value;
+      try { localStorage.setItem(LAST_MATERIAL_KEY, currentMaterialName); } catch (_) {}
+    } else {
+      currentMaterialName = '';
+      try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
+    }
+    updateMaterialDropdownState();
     applyPlatesGate();
   });
 }
+
+updateMaterialDropdownState();
 if (manageStockBtn) {
   manageStockBtn.addEventListener('click', () => {
     window.open('stock.html', '_blank');
@@ -2462,6 +3012,8 @@ async function buildExportCanvasForPdf() {
   };
   addSummary(currentMaterialName ? `Material: ${currentMaterialName}` : '');
   addSummary(summaryPiecesEl?.textContent);
+  addSummary(summaryPlatesEl?.textContent);
+  addSummary(summaryPlateCostEl?.textContent);
   addSummary(summaryReqEl?.textContent);
   addSummary(summaryPlacedEl?.textContent);
   addSummary(summaryLeftEl?.textContent);
@@ -2559,15 +3111,21 @@ async function exportPNG() {
   ctx.fillText(title, margin, 34);
   const sMaterial = currentMaterialName ? `Material: ${currentMaterialName}` : '';
   const sPieces = (summaryPiecesEl?.textContent || '').trim();
+  const sPlates = (summaryPlatesEl?.textContent || '').trim();
+  const sPlateCost = (summaryPlateCostEl?.textContent || '').trim();
   const sArea = (summaryAreaEl?.textContent || '').trim();
   const sUtil = (summaryUtilEl?.textContent || '').trim();
   const sWaste = (summaryWasteEl?.textContent || '').trim();
   ctx.font = '16px system-ui';
   if (sMaterial) ctx.fillText(sMaterial, margin, 52);
-  ctx.fillText(sPieces, margin, 64);
-  ctx.fillText(sArea, margin, 88);
-  ctx.fillText(sUtil, targetW - 360, 64);
-  ctx.fillText(sWaste, targetW - 360, 88);
+  const leftStats = [sPieces, sPlates, sPlateCost, sArea].filter(Boolean);
+  leftStats.forEach((text, idx) => {
+    ctx.fillText(text, margin, 64 + idx * 12);
+  });
+  const rightStats = [sUtil, sWaste].filter(Boolean);
+  rightStats.forEach((text, idx) => {
+    ctx.fillText(text, targetW - 360, 64 + idx * 12);
+  });
   // Placas
   let y = headerH;
   scaled.forEach(({ img, w, h }, idx) => {
@@ -2717,6 +3275,196 @@ function encodeMimeWord(str) {
   return `=?UTF-8?B?${base64}?=`;
 }
 
+function buildSummaryReport() {
+  const lines = [];
+  const pushLine = (text = '') => {
+    if (text === null || text === undefined) return;
+    const normalized = String(text).trim();
+    lines.push(normalized);
+  };
+  const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
+
+  const projectName = (projectNameEl?.value || '').trim() || 'Sin nombre';
+  pushLine(`Proyecto: ${projectName}`);
+  const materialLabel = (currentMaterialName || '').trim() || 'Sin material seleccionado';
+  pushLine(`Material: ${materialLabel}`);
+
+  const summaryElements = [
+    summaryPiecesEl,
+    summaryPlatesEl,
+    summaryPlateCostEl,
+    summaryAreaEl,
+    summaryUtilEl,
+    summaryWasteEl,
+    summaryReqEl,
+    summaryPlacedEl,
+    summaryLeftEl
+  ];
+
+  const summaryLines = summaryElements
+    .map((el) => (el?.textContent || '').trim())
+    .filter(Boolean);
+
+  if (summaryLines.length) {
+    lines.push('');
+    lines.push('Resumen general:');
+    summaryLines.forEach((line) => pushLine(`- ${line}`));
+  }
+
+  if (summaryTotalEl) {
+    const childLines = Array.from(summaryTotalEl.children || [])
+      .map((node) => (node.textContent || '').trim())
+      .filter(Boolean);
+    const totalText = childLines.length ? childLines : [(summaryTotalEl.textContent || '').trim()];
+    const clean = totalText.filter(Boolean);
+    if (clean.length) {
+      lines.push('');
+      lines.push('Cubre canto:');
+      clean.forEach((line) => pushLine(`- ${line}`));
+    }
+  }
+
+  if (summaryListEl) {
+    const rowSummaries = Array.from(summaryListEl.querySelectorAll('li span:last-child') || [])
+      .map((span) => (span.textContent || '').trim())
+      .filter(Boolean);
+    if (rowSummaries.length) {
+      lines.push('');
+      lines.push('Resumen por filas:');
+      rowSummaries.forEach((line) => pushLine(`- ${line}`));
+    }
+  }
+
+  if (lastPlateCostSummary.count > 0) {
+    lines.push('');
+    lines.push('Costo de placas:');
+    const mat = lastPlateCostSummary.material ? lastPlateCostSummary.material : materialLabel;
+    pushLine(`- Material: ${mat || 'Sin material seleccionado'}`);
+    pushLine(`- Valor unitario: $${fmt(lastPlateCostSummary.unit, 2)}`);
+    pushLine(`- Placas utilizadas: ${lastPlateCostSummary.count}`);
+    pushLine(`- Total: $${fmt(lastPlateCostSummary.total, 2)}`);
+  }
+
+  if (lastEdgeCostSummary.totalMeters > 0 || (lastEdgeCostSummary.entries || []).length) {
+    lines.push('');
+    lines.push('Costo cubre canto:');
+    pushLine(`- Total: ${fmt(lastEdgeCostSummary.totalMeters, 3)} m — $${fmt(lastEdgeCostSummary.totalCost, 2)}`);
+    (lastEdgeCostSummary.entries || []).forEach(({ label, meters, cost }) => {
+      const costText = Number.isFinite(cost) ? ` — $${fmt(cost, 2)}` : '';
+      pushLine(`- ${label}: ${fmt(meters, 3)} m${costText}`);
+    });
+  }
+
+  const plates = getPlates();
+  if (plates.length) {
+    lines.push('');
+    lines.push('Placas configuradas:');
+    plates.forEach((plate, idx) => {
+      const qty = Number.isFinite(plate.sc) ? plate.sc : 0;
+      const dims = `${fmt(plate.sw, 0)} × ${fmt(plate.sh, 0)} mm`;
+      const trims = [];
+      if (plate.trim && Number.isFinite(plate.trim.mm) && plate.trim.mm > 0) {
+        trims.push(`desbaste ${fmt(plate.trim.mm, 0)} mm`);
+        const trimSides = [];
+        if (plate.trim.top) trimSides.push('superior');
+        if (plate.trim.right) trimSides.push('derecha');
+        if (plate.trim.bottom) trimSides.push('inferior');
+        if (plate.trim.left) trimSides.push('izquierda');
+        if (trimSides.length) trims.push(`lados: ${trimSides.join(', ')}`);
+      }
+      const trimText = trims.length ? ` (${trims.join('; ')})` : '';
+      pushLine(`- Placa ${idx + 1}: ${qty} unidad(es) de ${dims}${trimText}`);
+    });
+  }
+
+  const rows = getRows();
+  const rowDetails = [];
+  rows.forEach((row, idx) => {
+    const [qtyInput, widthInput, heightInput] = getRowCoreInputs(row);
+    if (!qtyInput || !widthInput || !heightInput) return;
+    const qty = parseInt(qtyInput.value, 10);
+    const w = parseFloat(widthInput.value);
+    const h = parseFloat(heightInput.value);
+    if (!(qty >= 1 && w > 0 && h > 0)) return;
+
+    let rotationLabel = 'Automática';
+    if (row._manualRotWanted === true) rotationLabel = 'Manual 90°';
+    else if (row._manualRotWanted === false) rotationLabel = 'Manual 0°';
+    else if (row._getRotation && row._getRotation()) rotationLabel = 'Automática (rotada)';
+
+    const edgeLines = row.querySelectorAll('line.edge');
+    const sideNames = ['superior', 'derecha', 'inferior', 'izquierda'];
+    const selectedSides = [];
+    edgeLines.forEach((edge, i) => {
+      if (edge.dataset.selected === '1') selectedSides.push(sideNames[i] || `lado ${i + 1}`);
+    });
+
+    const sanitizeEdgeLabel = (select) => {
+      if (!select) return 'Sin selección';
+      const option = select.selectedOptions?.[0];
+      if (!option) return 'Sin selección';
+      return (option.textContent || '').trim() || 'Sin selección';
+    };
+
+    const widthEdgeSelect = row._edgeSelects?.width || row.querySelector('select[data-role="width-edge"]');
+    const heightEdgeSelect = row._edgeSelects?.height || row.querySelector('select[data-role="height-edge"]');
+    const horizontalEdgeLabel = sanitizeEdgeLabel(widthEdgeSelect);
+    const verticalEdgeLabel = sanitizeEdgeLabel(heightEdgeSelect);
+    const rowEdgebandMm = lastEdgebandByRow.get(idx) || 0;
+    const rowEdgebandMeters = rowEdgebandMm / 1000;
+
+    const parts = [];
+    parts.push(`${qty} corte(s) de ${fmt(w, 0)} × ${fmt(h, 0)} mm`);
+    parts.push(`rotación: ${rotationLabel}`);
+    parts.push(`bordes seleccionados: ${selectedSides.length ? selectedSides.join(', ') : 'ninguno'}`);
+    parts.push(`cubre canto fila: ${fmt(rowEdgebandMeters, 3)} m`);
+    parts.push(`cubre canto horizontal: ${horizontalEdgeLabel}`);
+    parts.push(`cubre canto vertical: ${verticalEdgeLabel}`);
+    rowDetails.push(`- Fila ${idx + 1}: ${parts.join(' | ')}`);
+  });
+
+  if (rowDetails.length) {
+    lines.push('');
+    lines.push('Detalle de cortes:');
+    rowDetails.forEach((line) => pushLine(line));
+  }
+
+  return lines.join('\n');
+}
+
+async function sendPlainEmail({ token, to, subject, text }) {
+  if (!token) throw new Error('Falta el token de acceso para enviar el correo.');
+  const mimeParts = [
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    `to: ${to}`,
+    `subject: ${encodeMimeWord(subject)}`,
+    '',
+    text,
+    ''
+  ];
+  const message = mimeParts.join('\r\n');
+  const messageBytes = new TextEncoder().encode(message);
+  const raw = toBase64UrlFromUint8(messageBytes);
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw })
+  });
+  if (!response.ok) {
+    let details = '';
+    try {
+      const errorBody = await response.json();
+      details = errorBody?.error?.message ? `: ${errorBody.error.message}` : '';
+    } catch (_) {}
+    throw new Error(`Google respondió ${response.status}${details}`);
+  }
+  return response.json();
+}
+
 async function sendEmailWithAttachment({ token, to, subject, text, filename, blob }) {
   if (!token) throw new Error('Falta el token de acceso para enviar el correo.');
   const pdfBase64 = await blobToBase64(blob);
@@ -2782,6 +3530,8 @@ async function handleSendCuts() {
   }
   sendCutsBtn.disabled = true;
   sendCutsBtn.textContent = 'Enviando…';
+  sendCutsBtn.dataset.busy = '1';
+  sendCutsBtn.classList.add('disabled-btn');
   try {
     const result = await buildExportCanvasForPdf();
     if (!result) return;
@@ -2795,43 +3545,167 @@ async function handleSendCuts() {
       .replace(/^_+|_+$/g, '')
       .toLowerCase() || 'cortes';
     const filename = `cortes-${slug}.pdf`;
-    triggerBlobDownload(filename, pdfBlob);
+    const jsonState = serializeState();
+    const jsonBlob = new Blob([JSON.stringify(jsonState, null, 2)], { type: 'application/json' });
+    const jsonFilename = `${slug || 'cortes'}-proyecto.json`;
+    triggerBlobDownload(jsonFilename, jsonBlob);
     const subjectName = rawName || title || 'Plano de cortes';
     const bodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
-    await sendEmailWithAttachment({
-      token: authUser.accessToken,
-      to: 'marcossuhit@gmail.com',
-      subject: `Plano de cortes - ${subjectName}`,
-      text: bodyText,
-      filename,
-      blob: pdfBlob
-    });
-    alert(`Se envió ${filename} a marcossuhit@gmail.com.`);
+    const summaryReport = buildSummaryReport();
+    const adminEmail = 'marcossuhit@gmail.com';
+    const recipientsSent = [];
+    const sendErrors = [];
+
+    const sendTo = async (to, text) => {
+      await sendEmailWithAttachment({
+        token: authUser.accessToken,
+        to,
+        subject: `Plano de cortes - ${subjectName}`,
+        text,
+        filename,
+        blob: pdfBlob
+      });
+    };
+
+    if (adminEmail) {
+      try {
+        await sendTo(adminEmail, `${bodyText}\n\n${summaryReport}`);
+        recipientsSent.push(adminEmail);
+      } catch (err) {
+        console.error('No se pudo enviar al administrador', err);
+        sendErrors.push(`No se pudo enviar a ${adminEmail}: ${err?.message || err}`);
+      }
+    }
+
+    const userEmail = (authUser.email || '').trim();
+    if (userEmail) {
+      const greeting = authUser.name ? `Hola ${authUser.name.trim()},` : 'Hola,';
+      const userText = `${greeting}\n\n${bodyText}\n\n${summaryReport}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
+      try {
+        await sendPlainEmail({
+          token: authUser.accessToken,
+          to: userEmail,
+          subject: `Plano de cortes - ${subjectName}`,
+          text: userText
+        });
+        recipientsSent.push(userEmail);
+      } catch (err) {
+        console.error('No se pudo enviar al usuario final', err);
+        sendErrors.push(`No se pudo enviar a ${userEmail}: ${err?.message || err}`);
+      }
+    }
+
+    const downloadNotice = 'También se descargó una copia local para que puedas importarla en la app y seguir editando sin volver a cargar los cortes.';
+    if (sendErrors.length) {
+      const successNote = recipientsSent.length ? `Se envió correctamente a: ${recipientsSent.join(', ')}.` : 'No se pudo completar ningún envío.';
+      alert(`${sendErrors.join('\n')}\n${successNote}\n${downloadNotice}`);
+    } else {
+      const recipientLabel = recipientsSent.length ? recipientsSent.join(', ') : 'los destinatarios configurados';
+      alert(`Se envió ${filename} a ${recipientLabel}.\n${downloadNotice}`);
+    }
   } catch (err) {
     console.error(err);
     alert(`No se pudo enviar el correo: ${err?.message || err}`);
   } finally {
-    sendCutsBtn.disabled = false;
+    delete sendCutsBtn.dataset.busy;
     sendCutsBtn.textContent = sendCutsDefaultLabel;
+    sendCutsBtn.disabled = false;
+    sendCutsBtn.classList.remove('disabled-btn');
+    toggleActionButtons(isSheetComplete());
   }
 }
 
-if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportPDF);
+async function handleWhatsAppShare(event) {
+  event.preventDefault();
+  const fallback = () => {
+    window.open(buildWhatsappUrl(), '_blank', 'noopener,noreferrer');
+  };
+
+  if (!(whatsappLink && isBackofficeAllowed)) {
+    fallback();
+    return;
+  }
+
+  if (whatsappLink.dataset.busy === '1') return;
+
+  if (!isSheetComplete()) {
+    fallback();
+    return;
+  }
+
+  whatsappLink.dataset.busy = '1';
+  whatsappLink.classList.add('disabled-btn');
+  try {
+    const result = await buildExportCanvasForPdf();
+    if (!result) {
+      fallback();
+      return;
+    }
+    const { canvas, projectName, title } = result;
+    const pdfBlob = canvasToPdfBlob(canvas);
+    const baseName = (projectName || title || 'planificación').trim() || 'planificacion';
+    const slug = baseName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase() || 'planificacion';
+    const fileName = `planificacion-${slug}.pdf`;
+    const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+    let shared = false;
+    if (navigator.share) {
+      const shareData = { text: WHATSAPP_MESSAGE, files: [pdfFile], title: fileName };
+      if (!navigator.canShare || navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share(shareData);
+          shared = true;
+        } catch (shareErr) {
+          if (shareErr?.name !== 'AbortError') {
+            console.warn('WhatsApp share fallback', shareErr);
+          }
+        }
+      }
+    }
+
+    if (!shared) {
+      triggerBlobDownload(fileName, pdfBlob);
+      fallback();
+    }
+  } catch (err) {
+    console.error('No se pudo preparar el PDF para WhatsApp', err);
+    fallback();
+  } finally {
+    delete whatsappLink.dataset.busy;
+    whatsappLink.classList.remove('disabled-btn');
+  }
+}
+
+if (exportPdfBtn && isBackofficeAllowed) exportPdfBtn.addEventListener('click', exportPDF);
 if (sendCutsBtn) {
   sendCutsBtn.addEventListener('click', () => {
     handleSendCuts();
   });
+}
+if (whatsappLink) {
+  whatsappLink.href = buildWhatsappUrl();
+  whatsappLink.addEventListener('click', handleWhatsAppShare);
 }
 if (resetAllBtn) {
   resetAllBtn.addEventListener('click', () => {
     clearAllPlates();
     clearAllRows();
     if (projectNameEl) projectNameEl.value = '';
+    pendingKerfValue = '0';
     if (kerfInput) kerfInput.value = '0';
     if (autoRotateToggle) autoRotateToggle.checked = true;
     if (plateMaterialSelect) {
-      plateMaterialSelect.selectedIndex = 0;
-      currentMaterialName = plateMaterialSelect.value || DEFAULT_MATERIAL;
+      if (plateMaterialSelect.querySelector('option[value=""]')) {
+        plateMaterialSelect.value = '';
+      }
+      currentMaterialName = '';
+      try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
+      updateMaterialDropdownState();
     } else {
       currentMaterialName = DEFAULT_MATERIAL;
     }
@@ -2850,9 +3724,10 @@ function recalcEdgebanding() {
   let totalCost = 0;
   const items = [];
   const edgeTotals = new Map();
-  const showCosts = !!isBackofficeAllowed;
+  const showCosts = true;
   const priceMap = new Map(edgeCatalog.map((item) => [item.name.toLocaleLowerCase(), Number.isFinite(item.pricePerMeter) ? item.pricePerMeter : 0]));
   lastEdgebandByRow = new Map();
+  lastEdgeCostSummary = { totalMeters: 0, totalCost: 0, entries: [] };
 
   const addEdgeUsage = (edgeName, mm) => {
     if (!(mm > 0)) return;
@@ -2921,10 +3796,9 @@ function recalcEdgebanding() {
   });
 
   const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
-  if (summaryTotalEl) {
-    const lines = [];
-    const summaryEntries = Array.from(edgeTotals.values()).sort((a, b) => b.mm - a.mm);
-    summaryEntries.forEach((entry) => {
+  const summaryEntries = Array.from(edgeTotals.values()).sort((a, b) => b.mm - a.mm);
+  const lines = [];
+  summaryEntries.forEach((entry) => {
       const meters = entry.mm / 1000;
       const normalized = entry.name ? entry.name.toLocaleLowerCase() : '';
       const hasCatalogPrice = normalized ? priceMap.has(normalized) : false;
@@ -2933,14 +3807,14 @@ function recalcEdgebanding() {
       const label = entry.name && !hasCatalogPrice ? `${entry.name} (no catalogado)` : entry.name;
       totalMeters += meters;
       if (showCosts) totalCost += cost;
-      lines.push({ label, meters, cost: showCosts ? cost : null });
-    });
+      lines.push({ label, meters, cost });
+  });
+  if (summaryTotalEl) {
     if (lines.length) {
       summaryTotalEl.textContent = '';
       const totalLine = document.createElement('div');
-      totalLine.textContent = showCosts
-        ? `Cubre canto total: ${fmt(totalMeters, 3)} m — $${fmt(totalCost, 2)}`
-        : `Cubre canto total: ${fmt(totalMeters, 3)} m`;
+      const costLabel = showCosts ? ` — $${fmt(totalCost, 2)}` : '';
+      totalLine.textContent = `Cubre canto total: ${fmt(totalMeters, 3)} m${costLabel}`;
       summaryTotalEl.appendChild(totalLine);
       lines.forEach(({ label, meters, cost }) => {
         const lineDiv = document.createElement('div');
@@ -2952,6 +3826,11 @@ function recalcEdgebanding() {
       summaryTotalEl.textContent = '';
     }
   }
+  lastEdgeCostSummary = {
+    totalMeters,
+    totalCost: showCosts ? totalCost : 0,
+    entries: lines.map(({ label, meters, cost }) => ({ label, meters, cost }))
+  };
   // Actualizar lista combinada (con datos de colocación)
   updateRowSummaryUI();
 }
@@ -2960,6 +3839,7 @@ function recalcEdgebanding() {
 function renderSheetOverview() {
   if (!sheetCanvasEl) return;
   sheetCanvasEl.innerHTML = '';
+  lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: currentMaterialName || '' };
   const solution = solveCutLayoutInternal();
   if (!solution) {
     captureFeasibleState();
@@ -2990,104 +3870,114 @@ function renderSheetOverview() {
   const pieceMetaMap = new Map(Array.isArray(solvedPieces) ? solvedPieces.map((p) => [p.id, p]) : []);
   const rowElements = getRows();
   const svgNS = 'http://www.w3.org/2000/svg';
-  const holder = document.createElement('div');
-  holder.className = 'sheet-multi';
+  const allowRender = true;
+  const totalPlates = Array.isArray(instances) ? instances.length : 0;
+  const usedPlateCount = Array.isArray(placementsByPlate)
+    ? placementsByPlate.reduce((acc, plate) => acc + (Array.isArray(plate) && plate.length ? 1 : 0), 0)
+    : 0;
 
-  instances.forEach((instance, plateIdx) => {
-    const placed = placementsByPlate[plateIdx] || [];
-    const trim = instance.trim || { mm: 0, top: false, right: false, bottom: false, left: false };
-    const trimValue = Math.max(0, trim.mm || 0);
-    const leftT = trim.left ? trimValue : 0;
-    const rightT = trim.right ? trimValue : 0;
-    const topT = trim.top ? trimValue : 0;
-    const bottomT = trim.bottom ? trimValue : 0;
+  if (allowRender) {
+    const holder = document.createElement('div');
+    holder.className = 'sheet-multi';
 
-    const VIEW_W = 1000;
-    const LABEL_EXTRA_H = 24;
-    const PAD_X = 16;
-    const PAD_BOTTOM = 16;
-    const PAD_TOP = PAD_BOTTOM + LABEL_EXTRA_H;
-    const innerW = VIEW_W - PAD_X * 2;
-    const scale = instance.sw > 0 ? innerW / instance.sw : 0;
-    const contentH = instance.sh * scale;
-    const baseViewH = Math.round(contentH + PAD_TOP + PAD_BOTTOM);
-    const noticeExtra = leftoverPieces.length ? 20 : 0;
-    const VIEW_H = Math.max(1, baseViewH + noticeExtra);
+    instances.forEach((instance, plateIdx) => {
+      const placed = placementsByPlate[plateIdx] || [];
+      const trim = instance.trim || { mm: 0, top: false, right: false, bottom: false, left: false };
+      const trimValue = Math.max(0, trim.mm || 0);
+      const leftT = trim.left ? trimValue : 0;
+      const rightT = trim.right ? trimValue : 0;
+      const topT = trim.top ? trimValue : 0;
+      const bottomT = trim.bottom ? trimValue : 0;
 
-  const wrap = document.createElement('div');
-  const title = document.createElement('div');
-  title.className = 'plate-title';
-  const caret = document.createElement('span');
-  caret.className = 'caret';
-  const isCollapsed = collapsedPlates.has(plateIdx);
-  caret.textContent = isCollapsed ? '►' : '▼';
-  const titleText = document.createElement('span');
-  titleText.textContent = `Placa ${plateIdx + 1} de ${instances.length}` + (currentMaterialName ? ` · ${currentMaterialName}` : '');
-    title.appendChild(caret);
-    title.appendChild(titleText);
-    wrap.appendChild(title);
+      const VIEW_W = 1000;
+      const LABEL_EXTRA_H = 24;
+      const PAD_X = 16;
+      const PAD_BOTTOM = 16;
+      const PAD_TOP = PAD_BOTTOM + LABEL_EXTRA_H;
+      const innerW = VIEW_W - PAD_X * 2;
+      const scale = instance.sw > 0 ? innerW / instance.sw : 0;
+      const contentH = instance.sh * scale;
+      const baseViewH = Math.round(contentH + PAD_TOP + PAD_BOTTOM);
+      const noticeExtra = leftoverPieces.length ? 20 : 0;
+      const VIEW_H = Math.max(1, baseViewH + noticeExtra);
 
-    const svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${VIEW_W} ${VIEW_H}`);
-    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      const wrap = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'plate-title';
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      const isCollapsed = collapsedPlates.has(plateIdx);
+      caret.textContent = isCollapsed ? '►' : '▼';
+      const titleText = document.createElement('span');
+      titleText.textContent = `Placa ${plateIdx + 1} de ${instances.length}` + (currentMaterialName ? ` · ${currentMaterialName}` : '');
+      title.appendChild(caret);
+      title.appendChild(titleText);
+      wrap.appendChild(title);
 
-    const rect = document.createElementNS(svgNS, 'rect');
-    rect.setAttribute('class', 'sheet-outline');
-    rect.setAttribute('x', String(PAD_X));
-    rect.setAttribute('y', String(PAD_TOP));
-    rect.setAttribute('width', String(innerW));
-    rect.setAttribute('height', String(contentH));
-    rect.setAttribute('rx', '6');
-    svg.appendChild(rect);
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('viewBox', `0 0 ${VIEW_W} ${VIEW_H}`);
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svg.dataset.plateWidthMm = String(instance.sw || 0);
+      svg.dataset.plateHeightMm = String(instance.sh || 0);
+      svg.dataset.scale = String(scale || 0);
 
-    const label = document.createElementNS(svgNS, 'text');
-    label.setAttribute('class', 'sheet-dims');
-    label.setAttribute('x', String(VIEW_W / 2));
-    label.setAttribute('y', String(PAD_TOP - LABEL_EXTRA_H + 20));
-    label.setAttribute('text-anchor', 'middle');
-    label.textContent = `${formatNumber(instance.sw, 0)} × ${formatNumber(instance.sh, 0)} mm`;
-    svg.appendChild(label);
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('class', 'sheet-outline');
+      rect.setAttribute('x', String(PAD_X));
+      rect.setAttribute('y', String(PAD_TOP));
+      rect.setAttribute('width', String(innerW));
+      rect.setAttribute('height', String(contentH));
+      rect.setAttribute('rx', '6');
+      svg.appendChild(rect);
 
-    const ox = PAD_X;
-    const oy = PAD_TOP;
+      const label = document.createElementNS(svgNS, 'text');
+      label.setAttribute('class', 'sheet-dims');
+      label.setAttribute('x', String(VIEW_W / 2));
+      label.setAttribute('y', String(PAD_TOP - LABEL_EXTRA_H + 20));
+      label.setAttribute('text-anchor', 'middle');
+      label.textContent = `${formatNumber(instance.sw, 0)} × ${formatNumber(instance.sh, 0)} mm`;
+      svg.appendChild(label);
 
-    const defs = document.createElementNS(svgNS, 'defs');
-    const pattern = document.createElementNS(svgNS, 'pattern');
-    const patId = `hatch-${plateIdx}`;
-    pattern.setAttribute('id', patId);
-    pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-    pattern.setAttribute('width', '10');
-    pattern.setAttribute('height', '10');
-    const line = document.createElementNS(svgNS, 'path');
-    line.setAttribute('d', 'M0 10 L10 0');
-    const isLightTheme = document.body.classList.contains('theme-light');
-    line.setAttribute('stroke', isLightTheme ? '#64748b26' : '#94a3b822');
-    line.setAttribute('stroke-width', '1');
-    pattern.appendChild(line);
-    defs.appendChild(pattern);
-    svg.appendChild(defs);
-    const occupied = [];
+      const ox = PAD_X;
+      const oy = PAD_TOP;
 
-    const drawTrim = (x, y, w, h) => {
-      if (w <= 0 || h <= 0) return;
-      const r = document.createElementNS(svgNS, 'rect');
-      r.setAttribute('class', 'trim-band');
-      r.setAttribute('x', String(ox + x * scale));
-      r.setAttribute('y', String(oy + y * scale));
-      r.setAttribute('width', String(Math.max(1, w * scale)));
-      r.setAttribute('height', String(Math.max(1, h * scale)));
-      r.setAttribute('fill', '#f59e0b33');
-      r.setAttribute('stroke', 'none');
-      svg.appendChild(r);
-    };
+      const defs = document.createElementNS(svgNS, 'defs');
+      const pattern = document.createElementNS(svgNS, 'pattern');
+      const patId = `hatch-${plateIdx}`;
+      pattern.setAttribute('id', patId);
+      pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+      pattern.setAttribute('width', '10');
+      pattern.setAttribute('height', '10');
+      const line = document.createElementNS(svgNS, 'path');
+      line.setAttribute('d', 'M0 10 L10 0');
+      const isLightTheme = document.body.classList.contains('theme-light');
+      line.setAttribute('stroke', isLightTheme ? '#64748b26' : '#94a3b822');
+      line.setAttribute('stroke-width', '1');
+      pattern.appendChild(line);
+      defs.appendChild(pattern);
+      svg.appendChild(defs);
+      const occupied = [];
 
-    const eps = 2.5 / Math.max(0.0001, scale);
-    if (topT) { drawTrim(0, -eps, instance.sw, topT + eps); occupied.push({ x: 0, y: -eps, w: instance.sw, h: topT + eps }); }
-    if (bottomT) { drawTrim(0, instance.sh - bottomT, instance.sw, bottomT + eps); occupied.push({ x: 0, y: instance.sh - bottomT, w: instance.sw, h: bottomT + eps }); }
-    if (leftT) { drawTrim(-eps, 0, leftT + eps, instance.sh); occupied.push({ x: -eps, y: 0, w: leftT + eps, h: instance.sh }); }
-    if (rightT) { drawTrim(instance.sw - rightT, 0, rightT + eps, instance.sh); occupied.push({ x: instance.sw - rightT, y: 0, w: rightT + eps, h: instance.sh }); }
+      const drawTrim = (x, y, w, h) => {
+        if (w <= 0 || h <= 0) return;
+        const r = document.createElementNS(svgNS, 'rect');
+        r.setAttribute('class', 'trim-band');
+        r.setAttribute('x', String(ox + x * scale));
+        r.setAttribute('y', String(oy + y * scale));
+        r.setAttribute('width', String(Math.max(1, w * scale)));
+        r.setAttribute('height', String(Math.max(1, h * scale)));
+        r.setAttribute('fill', '#f59e0b33');
+        r.setAttribute('stroke', 'none');
+        svg.appendChild(r);
+      };
 
-    for (const r of placed) {
+      const eps = 2.5 / Math.max(0.0001, scale);
+      if (topT) { drawTrim(0, -eps, instance.sw, topT + eps); occupied.push({ x: 0, y: -eps, w: instance.sw, h: topT + eps }); }
+      if (bottomT) { drawTrim(0, instance.sh - bottomT, instance.sw, bottomT + eps); occupied.push({ x: 0, y: instance.sh - bottomT, w: instance.sw, h: bottomT + eps }); }
+      if (leftT) { drawTrim(-eps, 0, leftT + eps, instance.sh); occupied.push({ x: -eps, y: 0, w: leftT + eps, h: instance.sh }); }
+      if (rightT) { drawTrim(instance.sw - rightT, 0, rightT + eps, instance.sh); occupied.push({ x: instance.sw - rightT, y: 0, w: rightT + eps, h: instance.sh }); }
+
+      for (const r of placed) {
       const pxX = ox + r.x * scale;
       const pxY = oy + r.y * scale;
       const pxW = Math.max(1, r.w * scale);
@@ -3170,9 +4060,31 @@ function renderSheetOverview() {
         };
       }
 
+      const widthEdgeSelect = rowEl?._edgeSelects?.width || rowEl?.querySelector('select[data-role="width-edge"]');
+      const heightEdgeSelect = rowEl?._edgeSelects?.height || rowEl?.querySelector('select[data-role="height-edge"]');
+      const sanitizeLabel = (value, selectEl) => {
+        const trimmed = (value || '').trim();
+        if (trimmed) return trimmed;
+        if (!selectEl) return '';
+        const option = selectEl.selectedOptions?.[0];
+        if (!option) return '';
+        const raw = (option.textContent || '').trim();
+        if (!raw || /^sin\s+cubre\s*canto/i.test(raw)) return '';
+        const [base] = raw.split('—');
+        return (base || raw).trim();
+      };
+      let horizontalEdgeName = sanitizeLabel(widthEdgeSelect?.value, widthEdgeSelect);
+      let verticalEdgeName = sanitizeLabel(heightEdgeSelect?.value, heightEdgeSelect);
+
+      if (pieceMeta && baseRot !== finalRot) {
+        const swap = horizontalEdgeName;
+        horizontalEdgeName = verticalEdgeName;
+        verticalEdgeName = swap;
+      }
+
       const bandGroup = document.createElementNS(svgNS, 'g');
       bandGroup.setAttribute('class', 'edge-band-lines');
-      const drawLine = (x1, y1, x2, y2) => {
+      const drawLine = (x1, y1, x2, y2, meta = {}) => {
         const lineEl = document.createElementNS(svgNS, 'line');
         lineEl.setAttribute('class', 'edge-band-line');
         lineEl.setAttribute('x1', String(x1));
@@ -3182,6 +4094,15 @@ function renderSheetOverview() {
         lineEl.setAttribute('stroke', '#ffffff');
         lineEl.setAttribute('stroke-width', '1.2');
         lineEl.setAttribute('stroke-linecap', 'round');
+        if (meta.name) {
+          lineEl.setAttribute('data-edge-name', meta.name);
+        }
+        if (meta.orientation) {
+          lineEl.setAttribute('data-edge-orientation', meta.orientation);
+        }
+        if (meta.position) {
+          lineEl.setAttribute('data-edge-position', meta.position);
+        }
         bandGroup.appendChild(lineEl);
       };
       const halfW = pxW / 2;
@@ -3190,25 +4111,41 @@ function renderSheetOverview() {
         const len = halfW;
         const xStart = pxX + (pxW - len) / 2;
         const yPos = pxY + 8;
-        drawLine(xStart, yPos, xStart + len, yPos);
+        drawLine(xStart, yPos, xStart + len, yPos, {
+          name: horizontalEdgeName,
+          orientation: 'horizontal',
+          position: 'top'
+        });
       }
       if (selection.bottom && halfW > 4) {
         const len = halfW;
         const xStart = pxX + (pxW - len) / 2;
         const yPos = pxY + pxH - 8;
-        drawLine(xStart, yPos, xStart + len, yPos);
+        drawLine(xStart, yPos, xStart + len, yPos, {
+          name: horizontalEdgeName,
+          orientation: 'horizontal',
+          position: 'bottom'
+        });
       }
       if (selection.left && halfH > 4) {
         const len = halfH;
         const yStart = pxY + (pxH - len) / 2;
         const xPos = pxX + 8;
-        drawLine(xPos, yStart, xPos, yStart + len);
+        drawLine(xPos, yStart, xPos, yStart + len, {
+          name: verticalEdgeName,
+          orientation: 'vertical',
+          position: 'left'
+        });
       }
       if (selection.right && halfH > 4) {
         const len = halfH;
         const yStart = pxY + (pxH - len) / 2;
         const xPos = pxX + pxW - 8;
-        drawLine(xPos, yStart, xPos, yStart + len);
+        drawLine(xPos, yStart, xPos, yStart + len, {
+          name: verticalEdgeName,
+          orientation: 'vertical',
+          position: 'right'
+        });
       }
       if (bandGroup.childNodes.length) svg.appendChild(bandGroup);
       if (r.rot) {
@@ -3261,18 +4198,19 @@ function renderSheetOverview() {
       svg.appendChild(warn);
     }
 
-    wrap.appendChild(svg);
-    if (isCollapsed) wrap.classList.add('plate-collapsed');
+      wrap.appendChild(svg);
+      if (isCollapsed) wrap.classList.add('plate-collapsed');
 
-    title.addEventListener('click', () => {
-      const nowCollapsed = wrap.classList.toggle('plate-collapsed');
-      caret.textContent = nowCollapsed ? '►' : '▼';
-      if (nowCollapsed) collapsedPlates.add(plateIdx); else collapsedPlates.delete(plateIdx);
+      title.addEventListener('click', () => {
+        const nowCollapsed = wrap.classList.toggle('plate-collapsed');
+        caret.textContent = nowCollapsed ? '►' : '▼';
+        if (nowCollapsed) collapsedPlates.add(plateIdx); else collapsedPlates.delete(plateIdx);
+      });
+      holder.appendChild(wrap);
     });
-    holder.appendChild(wrap);
-  });
 
-  sheetCanvasEl.appendChild(holder);
+    sheetCanvasEl.appendChild(holder);
+  }
 
   const piecesCount = allPlaced.length;
   const areaMm2 = usedArea;
@@ -3285,6 +4223,29 @@ function renderSheetOverview() {
     return;
   }
   if (summaryPiecesEl) summaryPiecesEl.textContent = `Piezas colocadas: ${piecesCount}`;
+  if (summaryPlatesEl) {
+    const platesSummaryText = totalPlates && totalPlates !== usedPlateCount
+      ? `Placas utilizadas: ${usedPlateCount} de ${totalPlates}`
+      : `Placas utilizadas: ${usedPlateCount}`;
+    summaryPlatesEl.textContent = platesSummaryText;
+  }
+  if (summaryPlateCostEl) {
+    const materialPrice = getMaterialPrice(currentMaterialName);
+    const totalCost = materialPrice * usedPlateCount;
+    lastPlateCostSummary = {
+      unit: materialPrice,
+      total: totalCost,
+      count: usedPlateCount,
+      material: currentMaterialName || ''
+    };
+    if (usedPlateCount > 0) {
+      summaryPlateCostEl.style.display = '';
+      summaryPlateCostEl.textContent = `Costo placas: $${fmt(totalCost, 2)} (valor unitario: $${fmt(materialPrice, 2)})`;
+    } else {
+      summaryPlateCostEl.style.display = '';
+      summaryPlateCostEl.textContent = 'Costo placas: $0 (sin placas utilizadas)';
+    }
+  }
   if (summaryReqEl) summaryReqEl.textContent = `Cortes pedidos: ${totalRequested}`;
   if (summaryPlacedEl) summaryPlacedEl.textContent = `Colocados: ${piecesCount}`;
   if (summaryLeftEl) summaryLeftEl.textContent = `Fuera: ${Math.max(0, totalRequested - piecesCount)}`;

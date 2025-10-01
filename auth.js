@@ -81,11 +81,18 @@
   }
 
   function signOut() {
-  clearAuthUser();
-  try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
-  try { sessionStorage.removeItem('cortes_theme_v1'); } catch (_) {}
-  try { localStorage.removeItem('cortes_theme_v1'); } catch (_) {}
-  window.location.replace('login.html');
+    try {
+      if (window.StockSync && typeof window.StockSync.signOutFirebase === 'function') {
+        if (typeof window.StockSync.requiresAuth !== 'function' || window.StockSync.requiresAuth()) {
+          window.StockSync.signOutFirebase();
+        }
+      }
+    } catch (_) {}
+    clearAuthUser();
+    try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
+    try { sessionStorage.removeItem('cortes_theme_v1'); } catch (_) {}
+    try { localStorage.removeItem('cortes_theme_v1'); } catch (_) {}
+    window.location.replace('login.html');
   }
 
   function applyLoginRedirect() {

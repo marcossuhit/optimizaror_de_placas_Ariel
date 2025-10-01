@@ -1,2 +1,2 @@
-# Formato: material|cantidad
+# Formato: material|precio
 MDF Blanco|0

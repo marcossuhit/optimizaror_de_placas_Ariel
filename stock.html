@@ -21,8 +21,8 @@
             <input id="stockMaterialInput" type="text" placeholder="Ej: MDF Blanco" required />
           </label>
           <label>
-            Cantidad disponible
-            <input id="stockQtyInput" type="number" min="0" step="1" value="0" required />
+            Valor por placa ($)
+            <input id="stockPriceInput" type="number" min="0" step="0.01" value="0" required />
           </label>
           <div class="stock-form-actions">
             <button type="submit" class="btn primary">Guardar en stock</button>
@@ -37,7 +37,7 @@
           <thead>
             <tr>
               <th>Material</th>
-              <th>Cantidad</th>
+              <th>Valor $</th>
               <th></th>
             </tr>
           </thead>
@@ -80,6 +80,8 @@
       </section>
     </main>
 
+    <script src="stock-sync-config.js"></script>
+    <script src="stock-sync.js"></script>
     <script src="auth.js"></script>
     <script src="stock.js"></script>
   </body>
