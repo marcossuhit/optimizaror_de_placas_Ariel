@@ -109,6 +109,13 @@ body {
 }
 .btn:hover { background: #101933; }
 .btn:active { transform: translateY(1px); }
+.btn.btn-pending {
+  border-style: dashed;
+}
+.btn.btn-busy {
+  cursor: wait;
+  opacity: 0.7;
+}
 .disabled-btn {
   opacity: 0.55;
   pointer-events: none;

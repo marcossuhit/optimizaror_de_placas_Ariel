@@ -37,6 +37,7 @@ const summaryUtilEl = document.getElementById('summaryUtil');
 const summaryReqEl = document.getElementById('summaryReq');
 const summaryPlacedEl = document.getElementById('summaryPlaced');
 const summaryLeftEl = document.getElementById('summaryLeft');
+const recalcLayoutBtn = document.getElementById('recalcLayoutBtn');
 const userSessionEl = document.getElementById('userSession');
 const userGreetingEl = document.getElementById('userGreeting');
 const userEmailEl = document.getElementById('userEmail');
@@ -81,6 +82,62 @@ let remoteStockSnapshot = null;
 let remoteEdgeSnapshot = null;
 let lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: '' };
 let lastEdgeCostSummary = { totalMeters: 0, totalCost: 0, entries: [] };
+
+const LAYOUT_RECALC_DEBOUNCE_MS = 400;
+let layoutRecalcTimer = null;
+let layoutRecalcPending = false;
+let layoutRecalcBusy = false;
+
+function updateRecalcButtonState({ pending = layoutRecalcPending, busy = layoutRecalcBusy } = {}) {
+  if (!recalcLayoutBtn) return;
+  if (busy) {
+    recalcLayoutBtn.disabled = true;
+    recalcLayoutBtn.textContent = 'Recalculando…';
+    recalcLayoutBtn.classList.add('btn-busy');
+  } else {
+    recalcLayoutBtn.disabled = false;
+    recalcLayoutBtn.textContent = pending ? 'Actualizar layout (pendiente)' : 'Actualizar layout';
+    recalcLayoutBtn.classList.remove('btn-busy');
+    if (pending) {
+      recalcLayoutBtn.classList.add('btn-pending');
+    } else {
+      recalcLayoutBtn.classList.remove('btn-pending');
+    }
+  }
+}
+
+function performLayoutRecalc() {
+  if (layoutRecalcTimer) {
+    clearTimeout(layoutRecalcTimer);
+    layoutRecalcTimer = null;
+  }
+  layoutRecalcPending = false;
+  layoutRecalcBusy = true;
+  updateRecalcButtonState({ pending: false, busy: true });
+  try {
+    refreshAllPreviews();
+    recalcEdgebanding();
+    renderSheetOverview();
+  } finally {
+    layoutRecalcBusy = false;
+    updateRecalcButtonState({ pending: false, busy: false });
+  }
+}
+
+function scheduleLayoutRecalc({ immediate = false } = {}) {
+  if (immediate) {
+    performLayoutRecalc();
+    return;
+  }
+  layoutRecalcPending = true;
+  updateRecalcButtonState({ pending: true, busy: layoutRecalcBusy });
+  if (layoutRecalcTimer) clearTimeout(layoutRecalcTimer);
+  layoutRecalcTimer = setTimeout(() => {
+    performLayoutRecalc();
+  }, LAYOUT_RECALC_DEBOUNCE_MS);
+}
+
+updateRecalcButtonState();
 
 function attachNumericFilter(input, { allowBlank = true } = {}) {
   if (!input) return;
@@ -655,7 +712,7 @@ function refreshEdgeCatalog({ updateRows = true, catalog } = {}) {
       if (row._refreshEdgeSelects) row._refreshEdgeSelects();
     });
   }
-  recalcEdgebanding();
+  scheduleLayoutRecalc({ immediate: true });
 }
 
 refreshEdgeCatalog({ updateRows: false });
@@ -917,21 +974,40 @@ function getKerfMm() {
 
 const PACKING_EPSILON = 0.0001;
 const META_SETTINGS = {
-  minIterations: 40,
-  perPieceFactor: 6,
-  maxIterations: 400,
+  minIterations: 25,
+  perPieceFactor: 4,
+  maxIterations: 300,
   temperatureStart: 1.8,
-  temperatureCool: 0.9,
+  temperatureCool: 0.92,
   temperatureMin: 0.08,
-  minPerturbation: 0.05,
-  maxPerturbation: 0.55,
-  missingAreaWeight: 8,
-  missingPiecePenaltyFactor: 64,
-  randomRestarts: 7,
-  globalLoopsFactor: 0.6,
-  maxGlobalLoops: 80,
-  seedOrderSamples: 10
+  minPerturbation: 0.08,
+  maxPerturbation: 0.45,
+  missingAreaWeight: 6,
+  missingPiecePenaltyFactor: 48,
+  randomRestarts: 5,
+  globalLoopsFactor: 0.45,
+  maxGlobalLoops: 50,
+  seedOrderSamples: 6
 };
+
+function getAdaptiveMetaSettings(pieceCount) {
+  const settings = { ...META_SETTINGS };
+  if (pieceCount > 60) {
+    settings.maxIterations = 120;
+    settings.randomRestarts = 3;
+    settings.maxGlobalLoops = 25;
+    settings.seedOrderSamples = 4;
+    settings.perPieceFactor = 3.5;
+    settings.missingPiecePenaltyFactor = 40;
+  } else if (pieceCount > 40) {
+    settings.maxIterations = 180;
+    settings.randomRestarts = 4;
+    settings.maxGlobalLoops = 35;
+    settings.seedOrderSamples = 5;
+    settings.perPieceFactor = 4.5;
+  }
+  return settings;
+}
 
 function dimensionKeyNormalized(wVal, hVal) {
   const safeW = Number.isFinite(wVal) ? wVal : 0;
@@ -1378,7 +1454,7 @@ function groupLeftoverPieces(leftovers) {
 }
 
 function solveWithMetaHeuristics(instances, pieces, options) {
-  const metaSettings = { ...META_SETTINGS };
+  const metaSettings = getAdaptiveMetaSettings(pieces.length);
   if (!pieces.length) {
     const emptySolution = runGreedyGuillotine(instances, [], options, metaSettings);
     return {
@@ -1860,8 +1936,7 @@ function makeRow(index) {
     cfg.el.addEventListener('keydown', handleEnter(idx));
   });
   const applyTierChange = () => {
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc();
     persistState && persistState();
   };
   const handleTierInputChange = (input) => {
@@ -1890,8 +1965,7 @@ function makeRow(index) {
     };
     syncLabelDataset(wEdgeSelect);
     syncLabelDataset(hEdgeSelect);
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc();
     if (typeof persistState === 'function') persistState();
   };
   wEdgeSelect.addEventListener('change', handleEdgeSelectChange);
@@ -2075,8 +2149,7 @@ function makeRow(index) {
   const handleEdgeToggle = (edge) => {
     const newSelected = edge.dataset.selected !== '1';
     setEdgeSelected(edge, newSelected);
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc();
     persistState && persistState();
   };
 
@@ -2273,13 +2346,12 @@ function makeRow(index) {
     edgesHit.left.setAttribute('y2', String(ry + rh));
   }
 
-  iW.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); maybeAutoAppendRow(); });
-  iH.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); maybeAutoAppendRow(); });
+  iW.addEventListener('input', () => { updatePreview(); toggleAddButton(); scheduleLayoutRecalc(); persistState && persistState(); maybeAutoAppendRow(); });
+  iH.addEventListener('input', () => { updatePreview(); toggleAddButton(); scheduleLayoutRecalc(); persistState && persistState(); maybeAutoAppendRow(); });
   iRot.addEventListener('change', () => {
     row._manualRotWanted = iRot.checked;
     updatePreview();
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc();
     persistState && persistState();
   });
 
@@ -2291,8 +2363,7 @@ function makeRow(index) {
     }
     updatePreview();
     toggleAddButton();
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc();
     persistState && persistState();
     maybeAutoAppendRow();
   });
@@ -2523,9 +2594,7 @@ function applyPlatesGate() {
   });
   updateMaterialDropdownState();
   toggleAddButton();
-  recalcEdgebanding();
-  refreshAllPreviews();
-  renderSheetOverview();
+  scheduleLayoutRecalc();
   ensureKerfField();
   toggleActionButtons(enabled);
   persistState && persistState();
@@ -3108,6 +3177,7 @@ if (projectNameEl) projectNameEl.addEventListener('input', () => { persistState(
 
 // -------- Exportar PNG/PDF --------
 async function buildExportCanvasForPdf() {
+  scheduleLayoutRecalc({ immediate: true });
   const svgs = document.querySelectorAll('#sheetCanvas svg');
   if (!svgs.length) {
     alert('No hay placas para exportar');
@@ -3781,6 +3851,11 @@ if (sendCutsBtn) {
     handleSendCuts();
   });
 }
+if (recalcLayoutBtn) {
+  recalcLayoutBtn.addEventListener('click', () => {
+    scheduleLayoutRecalc({ immediate: true });
+  });
+}
 if (whatsappLink) {
   whatsappLink.href = buildWhatsappUrl();
   whatsappLink.addEventListener('click', handleWhatsAppShare);
@@ -4404,7 +4479,7 @@ function renderSheetOverview() {
 
 
 // Inicializar vista de placa al cargar
-renderSheetOverview();
+scheduleLayoutRecalc({ immediate: true });
 
 // Registrar Service Worker para PWA (si el navegador lo soporta)
 if ('serviceWorker' in navigator) {
@@ -4489,8 +4564,7 @@ if (themeToggleBtn) {
     writeStoredTheme(next);
     // Recolorear y redibujar
     reindexRows();
-    recalcEdgebanding();
-    renderSheetOverview();
+    scheduleLayoutRecalc({ immediate: true });
     updateRowSummaryUI();
   });
 }
