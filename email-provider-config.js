@@ -8,5 +8,5 @@ window.EMAIL_PROVIDER_CONFIG = {
   service: 'vercel-api',
   apiEndpoint: '/api/send-email',
   fromName: 'Optimizador de Placas',
-  fromOverride: 'onboarding@resend.dev'
+  fromOverride: 'no-reply@placasfernando.com.ar'
 };

@@ -23,7 +23,7 @@ const platesEl = document.getElementById('plates');
 const addPlateBtn = document.getElementById('addPlateBtn');
 let kerfInput = document.getElementById('kerfInput');
 let kerfFieldWrapper = kerfInput ? kerfInput.closest('.kerf-field') : null;
-let pendingKerfValue = kerfInput ? kerfInput.value : '0';
+let pendingKerfValue = kerfInput && kerfInput.value ? kerfInput.value : '5';
 const summaryTotalEl = document.getElementById('summaryTotal');
 const summaryListEl = document.getElementById('summaryList');
 const sheetCanvasEl = document.getElementById('sheetCanvas');
@@ -81,6 +81,25 @@ let remoteStockSnapshot = null;
 let remoteEdgeSnapshot = null;
 let lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: '' };
 let lastEdgeCostSummary = { totalMeters: 0, totalCost: 0, entries: [] };
+
+function attachNumericFilter(input, { allowBlank = true } = {}) {
+  if (!input) return;
+  input.inputMode = 'numeric';
+  input.addEventListener('keydown', (event) => {
+    const blocked = ['e', 'E', '+', '-', ',','.'];
+    if (blocked.includes(event.key)) {
+      event.preventDefault();
+    }
+  });
+  input.addEventListener('input', () => {
+    const digits = input.value.replace(/[^0-9]/g, '');
+    if (digits === '' && !allowBlank) {
+      input.value = '0';
+    } else {
+      input.value = digits;
+    }
+  });
+}
 
 function normalizeStockEntries(items) {
   if (!Array.isArray(items)) return [];
@@ -1643,6 +1662,7 @@ function makeRow(index) {
   iQty.value = '';
   iQty.className = 'row-input row-input-primary';
   iQty.dataset.role = 'qty';
+  attachNumericFilter(iQty, { allowBlank: true });
   fQty.appendChild(lQty);
   fQty.appendChild(iQty);
 
@@ -1658,6 +1678,7 @@ function makeRow(index) {
   iW.step = '1';
   iW.className = 'row-input row-input-primary';
   iW.dataset.role = 'width';
+  attachNumericFilter(iW, { allowBlank: true });
   const iWLevel = document.createElement('input');
   iWLevel.type = 'number';
   iWLevel.placeholder = '0';
@@ -1670,6 +1691,7 @@ function makeRow(index) {
   iWLevel.dataset.role = 'width-tier';
   iWLevel.title = 'Solo números 0, 1 o 2';
   iWLevel.setAttribute('aria-label', 'Ancho adicional (0 a 2)');
+  attachNumericFilter(iWLevel, { allowBlank: true });
   const wEdgeSelect = document.createElement('select');
   wEdgeSelect.className = 'edge-select';
   wEdgeSelect.dataset.role = 'width-edge';
@@ -1694,6 +1716,7 @@ function makeRow(index) {
   iH.step = '1';
   iH.className = 'row-input row-input-primary';
   iH.dataset.role = 'height';
+  attachNumericFilter(iH, { allowBlank: true });
   const iHLevel = document.createElement('input');
   iHLevel.type = 'number';
   iHLevel.placeholder = '0';
@@ -1706,6 +1729,7 @@ function makeRow(index) {
   iHLevel.dataset.role = 'height-tier';
   iHLevel.title = 'Solo números 0, 1 o 2';
   iHLevel.setAttribute('aria-label', 'Alto adicional (0 a 2)');
+  attachNumericFilter(iHLevel, { allowBlank: true });
   const hEdgeSelect = document.createElement('select');
   hEdgeSelect.className = 'edge-select';
   hEdgeSelect.dataset.role = 'height-edge';
@@ -2326,6 +2350,7 @@ clearAllBtn.addEventListener('click', () => {
 
 // Crear filas iniciales si no hay (cuando no hay proyecto guardado)
 function ensureDefaultRows() {
+  if (!isSheetComplete()) return;
   if (currentRowCount() === 0) {
     rowsEl.appendChild(makeRow(0));
     toggleAddButton();
@@ -2354,7 +2379,7 @@ function ensureKerfField() {
     kerfInput.type = 'number';
     kerfInput.min = '0';
     kerfInput.step = '1';
-    kerfInput.value = pendingKerfValue != null ? pendingKerfValue : '0';
+    kerfInput.value = pendingKerfValue != null ? pendingKerfValue : '5';
   }
 
   if (!kerfFieldWrapper) {
@@ -2381,7 +2406,7 @@ function ensureKerfField() {
   if (pendingKerfValue != null) {
     kerfInput.value = pendingKerfValue;
   } else if (!kerfInput.value) {
-    kerfInput.value = '0';
+    kerfInput.value = '5';
   }
   pendingKerfValue = kerfInput.value;
 
@@ -2405,6 +2430,7 @@ function makePlateRow(options = {}) {
   const fW = document.createElement('div'); fW.className = 'field';
   const lW = document.createElement('label'); lW.textContent = 'Ancho (mm)';
   const iW = document.createElement('input'); iW.className = 'plate-w'; iW.type = 'number'; iW.min = '0'; iW.step = '1'; iW.placeholder = 'Ej: 2440';
+  attachNumericFilter(iW, { allowBlank: false });
   if (widthValue !== '') iW.value = String(widthValue);
   if (readOnlySize) {
     iW.disabled = true;
@@ -2415,6 +2441,7 @@ function makePlateRow(options = {}) {
   const fH = document.createElement('div'); fH.className = 'field';
   const lH = document.createElement('label'); lH.textContent = 'Alto (mm)';
   const iH = document.createElement('input'); iH.className = 'plate-h'; iH.type = 'number'; iH.min = '0'; iH.step = '1'; iH.placeholder = 'Ej: 1220';
+  attachNumericFilter(iH, { allowBlank: false });
   if (heightValue !== '') iH.value = String(heightValue);
   if (readOnlySize) {
     iH.disabled = true;
@@ -2432,11 +2459,12 @@ function makePlateRow(options = {}) {
   const trimControls = document.createElement('div');
   trimControls.className = 'trim-controls';
   const trimLabel = document.createElement('div'); trimLabel.className = 'trim-label'; trimLabel.innerHTML = 'Refilado <span class="trim-badge">naranja</span> (mm) + lados';
-  const trimMm = document.createElement('input'); trimMm.className = 'trim-mm'; trimMm.type = 'number'; trimMm.min = '0'; trimMm.step = '1'; trimMm.value = '0'; trimMm.title = 'Refilado en milímetros';
+  const trimMm = document.createElement('input'); trimMm.className = 'trim-mm'; trimMm.type = 'number'; trimMm.min = '0'; trimMm.step = '1'; trimMm.value = '13'; trimMm.title = 'Refilado en milímetros';
+  attachNumericFilter(trimMm, { allowBlank: false });
   const sideTop = document.createElement('label'); sideTop.className = 'side'; const cTop = document.createElement('input'); cTop.type = 'checkbox'; sideTop.appendChild(cTop); sideTop.appendChild(document.createTextNode('Arriba'));
   const sideRight = document.createElement('label'); sideRight.className = 'side'; const cRight = document.createElement('input'); cRight.type = 'checkbox'; sideRight.appendChild(cRight); sideRight.appendChild(document.createTextNode('Derecha'));
-  const sideBottom = document.createElement('label'); sideBottom.className = 'side'; const cBottom = document.createElement('input'); cBottom.type = 'checkbox'; sideBottom.appendChild(cBottom); sideBottom.appendChild(document.createTextNode('Abajo'));
-  const sideLeft = document.createElement('label'); sideLeft.className = 'side'; const cLeft = document.createElement('input'); cLeft.type = 'checkbox'; sideLeft.appendChild(cLeft); sideLeft.appendChild(document.createTextNode('Izquierda'));
+  const sideBottom = document.createElement('label'); sideBottom.className = 'side'; const cBottom = document.createElement('input'); cBottom.type = 'checkbox'; cBottom.checked = true; sideBottom.appendChild(cBottom); sideBottom.appendChild(document.createTextNode('Abajo'));
+  const sideLeft = document.createElement('label'); sideLeft.className = 'side'; const cLeft = document.createElement('input'); cLeft.type = 'checkbox'; cLeft.checked = true; sideLeft.appendChild(cLeft); sideLeft.appendChild(document.createTextNode('Izquierda'));
   trimControls.appendChild(trimLabel);
   trimControls.appendChild(trimMm);
   trimControls.appendChild(sideTop);
@@ -2444,6 +2472,14 @@ function makePlateRow(options = {}) {
   trimControls.appendChild(sideBottom);
   trimControls.appendChild(sideLeft);
   trim.appendChild(trimControls);
+
+  if (!isBackofficeAllowed) {
+    trim.style.display = 'none';
+    trimMm.disabled = true;
+    [cTop, cRight, cBottom, cLeft].forEach((input) => {
+      input.disabled = true;
+    });
+  }
 
   const del = document.createElement('button'); del.className = 'btn remove'; del.textContent = 'Eliminar';
   del.addEventListener('click', () => {
@@ -2473,9 +2509,7 @@ function makePlateRow(options = {}) {
   row.appendChild(kerfSlot);
   row.appendChild(iC);
 
-  if (readOnlySize) {
-    onChange();
-  }
+  onChange();
 
   return row;
 }
@@ -2714,6 +2748,7 @@ function cloneSvgForExport(svgEl) {
   };
 
   const injectEdgeLabels = (targetSvg) => {
+    const svgNS = 'http://www.w3.org/2000/svg';
     const lines = targetSvg.querySelectorAll('.edge-band-line');
     if (!lines.length) return;
     lines.forEach((line) => {
@@ -2721,46 +2756,63 @@ function cloneSvgForExport(svgEl) {
       if (!name) return;
       const orientation = (line.getAttribute('data-edge-orientation') || '').trim();
       const position = (line.getAttribute('data-edge-position') || '').trim();
+      if (!orientation || !position) return;
+
       const x1 = parseFloat(line.getAttribute('x1') || '0');
       const y1 = parseFloat(line.getAttribute('y1') || '0');
       const x2 = parseFloat(line.getAttribute('x2') || '0');
       const y2 = parseFloat(line.getAttribute('y2') || '0');
       if (![x1, y1, x2, y2].every(Number.isFinite)) return;
 
+      const rawW = parseFloat(line.getAttribute('data-piece-raww') || '0');
+      const rawH = parseFloat(line.getAttribute('data-piece-rawh') || '0');
+      const minDim = Math.min(rawW > 0 ? rawW : Infinity, rawH > 0 ? rawH : Infinity);
+      const isSmall = Number.isFinite(minDim) && minDim < 200;
+      const fontSize = isSmall ? 6 : 9;
+
       const label = document.createElementNS(svgNS, 'text');
       label.setAttribute('class', 'edge-band-label');
-      label.setAttribute('font-size', '11');
+      label.setAttribute('font-size', String(fontSize));
       label.setAttribute('font-weight', '600');
       label.setAttribute('fill', '#111827');
       label.setAttribute('stroke', 'none');
       label.setAttribute('pointer-events', 'none');
+      label.setAttribute('dominant-baseline', 'middle');
       label.textContent = name;
 
       if (orientation === 'horizontal') {
         const centerX = (x1 + x2) / 2;
-        const baseY = (y1 + y2) / 2;
+        const baseYTop = Math.min(y1, y2);
+        const baseYBottom = Math.max(y1, y2);
+        const topOffset = isSmall ? -4 : -4;
+        const bottomOffset = isSmall ? 5 : 5;
         label.setAttribute('text-anchor', 'middle');
         label.setAttribute('x', String(centerX));
-        label.setAttribute('dominant-baseline', 'middle');
         if (position === 'top') {
-          label.setAttribute('y', String(baseY + 14));
+          label.setAttribute('y', String(baseYTop + topOffset));
+        } else if (position === 'bottom') {
+          label.setAttribute('y', String(baseYBottom + bottomOffset));
         } else {
-          label.setAttribute('y', String(baseY - 14));
+          return;
         }
       } else if (orientation === 'vertical') {
         const centerY = (y1 + y2) / 2;
-        label.setAttribute('dominant-baseline', 'middle');
+        const offset = isSmall ? 9 : 14;
+        const baseLeft = Math.min(x1, x2);
+        const baseRight = Math.max(x1, x2);
         label.setAttribute('text-anchor', 'middle');
         if (position === 'left') {
-          const textX = x1 + 12;
-          label.setAttribute('x', String(textX));
+          const x = baseLeft - 4;
+          label.setAttribute('x', String(x));
           label.setAttribute('y', String(centerY));
-          label.setAttribute('transform', `rotate(90 ${textX} ${centerY})`);
+          label.setAttribute('transform', `rotate(-90 ${x} ${centerY})`);
+        } else if (position === 'right') {
+          const x = baseRight + 3;
+          label.setAttribute('x', String(x));
+          label.setAttribute('y', String(centerY));
+          label.setAttribute('transform', `rotate(90 ${x} ${centerY})`);
         } else {
-          const textX = x1 - 12;
-          label.setAttribute('x', String(textX));
-          label.setAttribute('y', String(centerY));
-          label.setAttribute('transform', `rotate(-90 ${textX} ${centerY})`);
+          return;
         }
       } else {
         return;
@@ -3502,6 +3554,11 @@ async function sendEmailViaProvider({ from, to, subject, text, attachments = [] 
   const payload = { from, to, subject, text, attachments };
   if (!from || !to) throw new Error('El remitente y el destinatario son obligatorios.');
 
+  if (typeof window.sendViaApi === 'function') {
+    const result = await window.sendViaApi(payload);
+    return result ?? null;
+  }
+
   if (typeof window.GenericMailProvider === 'function') {
     const result = await window.GenericMailProvider(payload);
     return result ?? null;
@@ -3733,8 +3790,8 @@ if (resetAllBtn) {
     clearAllPlates();
     clearAllRows();
     if (projectNameEl) projectNameEl.value = '';
-    pendingKerfValue = '0';
-    if (kerfInput) kerfInput.value = '0';
+    pendingKerfValue = '5';
+    if (kerfInput) kerfInput.value = '5';
     if (autoRotateToggle) autoRotateToggle.checked = true;
     if (plateMaterialSelect) {
       if (plateMaterialSelect.querySelector('option[value=""]')) {
@@ -3746,8 +3803,6 @@ if (resetAllBtn) {
     } else {
       currentMaterialName = DEFAULT_MATERIAL;
     }
-    const firstRow = makeRow(0);
-    rowsEl.appendChild(firstRow);
     applyPlatesGate();
     toggleAddButton();
     resetSummaryUI();
@@ -4147,10 +4202,19 @@ function renderSheetOverview() {
         if (meta.position) {
           lineEl.setAttribute('data-edge-position', meta.position);
         }
+        if (Number.isFinite(meta.rawWidth)) {
+          lineEl.setAttribute('data-piece-raww', String(meta.rawWidth));
+        }
+        if (Number.isFinite(meta.rawHeight)) {
+          lineEl.setAttribute('data-piece-rawh', String(meta.rawHeight));
+        }
         bandGroup.appendChild(lineEl);
       };
       const halfW = pxW / 2;
       const halfH = pxH / 2;
+      const rawWidth = Number(r.rawW) || 0;
+      const rawHeight = Number(r.rawH) || 0;
+
       if (selection.top && halfW > 4) {
         const len = halfW;
         const xStart = pxX + (pxW - len) / 2;
@@ -4158,7 +4222,9 @@ function renderSheetOverview() {
         drawLine(xStart, yPos, xStart + len, yPos, {
           name: horizontalEdgeName,
           orientation: 'horizontal',
-          position: 'top'
+          position: 'top',
+          rawWidth,
+          rawHeight
         });
       }
       if (selection.bottom && halfW > 4) {
@@ -4168,7 +4234,9 @@ function renderSheetOverview() {
         drawLine(xStart, yPos, xStart + len, yPos, {
           name: horizontalEdgeName,
           orientation: 'horizontal',
-          position: 'bottom'
+          position: 'bottom',
+          rawWidth,
+          rawHeight
         });
       }
       if (selection.left && halfH > 4) {
@@ -4178,7 +4246,9 @@ function renderSheetOverview() {
         drawLine(xPos, yStart, xPos, yStart + len, {
           name: verticalEdgeName,
           orientation: 'vertical',
-          position: 'left'
+          position: 'left',
+          rawWidth,
+          rawHeight
         });
       }
       if (selection.right && halfH > 4) {
@@ -4188,7 +4258,9 @@ function renderSheetOverview() {
         drawLine(xPos, yStart, xPos, yStart + len, {
           name: verticalEdgeName,
           orientation: 'vertical',
-          position: 'right'
+          position: 'right',
+          rawWidth,
+          rawHeight
         });
       }
       if (bandGroup.childNodes.length) svg.appendChild(bandGroup);

@@ -55,4 +55,5 @@
   }
 
   window.GenericMailProvider = GenericMailProvider;
+  window.sendViaApi = sendViaApi;
 })();
