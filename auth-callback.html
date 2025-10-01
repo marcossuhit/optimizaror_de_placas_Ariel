@@ -53,14 +53,18 @@
           state,
           fetchedAt: Date.now()
         };
-        window.Auth.storeAuthUser(user);
-        let redirect = 'index.html';
-        try {
-          const stored = localStorage.getItem('post_login_redirect_v1');
-          if (stored) redirect = stored;
-          localStorage.removeItem('post_login_redirect_v1');
-        } catch (_) {}
-        window.location.replace(redirect);
+        if (window.Auth && typeof window.Auth.completeLogin === 'function') {
+          window.Auth.completeLogin(user);
+        } else {
+          window.Auth.storeAuthUser(user);
+          let redirect = 'index.html';
+          try {
+            const stored = localStorage.getItem('post_login_redirect_v1');
+            if (stored) redirect = stored;
+            localStorage.removeItem('post_login_redirect_v1');
+          } catch (_) {}
+          window.location.replace(redirect);
+        }
       })();
     </script>
   </body>

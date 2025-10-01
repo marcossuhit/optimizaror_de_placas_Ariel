@@ -533,7 +533,7 @@ body.theme-light .social-links a:hover {
 .sheet-outline { filter: drop-shadow(0 0 10px rgba(23, 162, 184, .2)); }
 .sheet-dims { fill: #cbd5e1; font-size: 16px; }
 .piece-rot { fill: #e5e7eb; font-size: 13px; opacity: .9; }
-.piece-label { fill: #e5e7eb; font-size: 12px; text-anchor: middle; dominant-baseline: middle; opacity: .95; }
+.piece-label { fill: #e5e7eb; text-anchor: middle; dominant-baseline: middle; opacity: .95; }
 
 .stock-body {
   background: var(--bg);

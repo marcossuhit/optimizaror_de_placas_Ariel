@@ -52,23 +52,23 @@ const StockSync = window.StockSync || null;
 const REMOTE_STOCK_SYNC_ENABLED = !!(StockSync && typeof StockSync.isConfigured === 'function' && StockSync.isConfigured());
 const DEFAULT_PLATE_WIDTH = 2750;
 const DEFAULT_PLATE_HEIGHT = 1830;
+const EMAIL_PROVIDER_ENDPOINT = typeof window.EMAIL_PROVIDER_ENDPOINT === 'string' ? window.EMAIL_PROVIDER_ENDPOINT : '';
 
 const LS_KEY = 'cortes_proyecto_v1';
 const DEFAULT_MATERIAL = 'MDF Blanco';
 const LAST_MATERIAL_KEY = 'selected_material_v1';
 const EDGE_STORAGE_KEY = 'edgeband_items_v1';
+
+try { localStorage.removeItem(LS_KEY); } catch (_) {}
+try { localStorage.removeItem(LAST_MATERIAL_KEY); } catch (_) {}
+
 let collapsedPlates = new Set();
 let edgeCatalog = [];
 
 // Estado para sincronizar resumen por fila
 let lastEdgebandByRow = new Map(); // rowIdx -> mm subtotal
 let lastPlacementByRow = new Map(); // rowIdx -> { requested, placed, left }
-let currentMaterialName;
-try {
-  currentMaterialName = localStorage.getItem(LAST_MATERIAL_KEY) || plateMaterialSelect?.value || '';
-} catch (_) {
-  currentMaterialName = plateMaterialSelect?.value || '';
-}
+let currentMaterialName = plateMaterialSelect?.value || '';
 const STOCK_STORAGE_KEY = 'stock_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
 let lastFetchedStockItems = [];
@@ -209,8 +209,7 @@ if (!isBackofficeAllowed) {
   if (rowsHeaderSection) rowsHeaderSection.style.display = '';
   if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
   if (addPlateBtn) {
-    addPlateBtn.disabled = false;
-    addPlateBtn.classList.remove('disabled-btn');
+    updateMaterialDropdownState();
   }
 }
 
@@ -572,7 +571,9 @@ function formatEdgeLabel(item) {
 
 function populateEdgeSelectOptions(select, selectedValue) {
   if (!select) return;
-  const value = selectedValue !== undefined ? selectedValue : select.value;
+  const datasetValue = (select.dataset?.value || '').trim();
+  const valueHint = selectedValue !== undefined ? selectedValue : (datasetValue || select.value);
+  const value = valueHint != null ? String(valueHint).trim() : '';
   select.innerHTML = '';
   const placeholder = document.createElement('option');
   placeholder.value = '';
@@ -599,10 +600,31 @@ function populateEdgeSelectOptions(select, selectedValue) {
     matched = true;
   }
 
-  if (matched && value) {
+  if (value) {
     select.value = value;
+    if (select.value !== value) {
+      // value no coincidió con ninguna opción; crear fallback explícito
+      const fallback = document.createElement('option');
+      fallback.value = value;
+      fallback.textContent = `${value} (no listado)`;
+      fallback.dataset.missing = '1';
+      select.appendChild(fallback);
+      select.value = value;
+    }
   } else {
     select.value = '';
+  }
+  const active = select.selectedOptions?.[0];
+  if (active && active.value) {
+    const raw = (active.textContent || '').trim();
+    const [base] = raw.split('—');
+    select.dataset.label = (base || raw).trim();
+    select.dataset.value = active.value || '';
+  } else {
+    if (!value) {
+      delete select.dataset.label;
+      delete select.dataset.value;
+    }
   }
 }
 
@@ -622,9 +644,18 @@ refreshEdgeCatalog({ updateRows: false });
 function updateMaterialDropdownState() {
   if (!addPlateBtn || !plateMaterialSelect) return;
   const hasSelection = !!plateMaterialSelect.value;
-  addPlateBtn.disabled = !hasSelection;
-  addPlateBtn.classList.toggle('disabled-btn', !hasSelection);
-  addPlateBtn.title = hasSelection ? '' : 'Seleccioná un material para agregar placas';
+  const plateCount = platesEl ? platesEl.querySelectorAll('.plate-row').length : 0;
+  const limitReached = isBackofficeAllowed ? plateCount >= 1 : false;
+  const shouldDisable = !hasSelection || limitReached;
+  addPlateBtn.disabled = shouldDisable;
+  addPlateBtn.classList.toggle('disabled-btn', shouldDisable);
+  if (!hasSelection) {
+    addPlateBtn.title = 'Seleccioná un material para agregar placas';
+  } else if (limitReached) {
+    addPlateBtn.title = 'Ya agregaste la placa disponible para este proyecto';
+  } else {
+    addPlateBtn.title = '';
+  }
 }
 
 function rebuildMaterialOptions(names, { placeholder = false } = {}) {
@@ -747,6 +778,17 @@ function getAddRowDisabledReason() {
     return 'Completá la última fila';
   }
   return null;
+}
+
+function maybeAutoAppendRow() {
+  if (!addRowBtn || addRowBtn.disabled) return;
+  if (!isSheetComplete()) return;
+  const rows = getRows();
+  if (!rows.length) return;
+  if (rows.length >= MAX_ROWS) return;
+  const lastRow = rows[rows.length - 1];
+  if (!isRowCompleteEl(lastRow)) return;
+  addRowBtn.click();
 }
 
 function toggleAddButton() {
@@ -1809,6 +1851,21 @@ function makeRow(index) {
     input.addEventListener('input', () => handleTierInputChange(input));
   });
   const handleEdgeSelectChange = () => {
+    const syncLabelDataset = (select) => {
+      if (!select) return;
+      const active = select.selectedOptions?.[0];
+      if (active && active.value) {
+        const raw = (active.textContent || '').trim();
+        const [base] = raw.split('—');
+        select.dataset.label = (base || raw).trim();
+        select.dataset.value = active.value || '';
+      } else {
+        delete select.dataset.label;
+        delete select.dataset.value;
+      }
+    };
+    syncLabelDataset(wEdgeSelect);
+    syncLabelDataset(hEdgeSelect);
     recalcEdgebanding();
     renderSheetOverview();
     if (typeof persistState === 'function') persistState();
@@ -2192,8 +2249,8 @@ function makeRow(index) {
     edgesHit.left.setAttribute('y2', String(ry + rh));
   }
 
-  iW.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); });
-  iH.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); });
+  iW.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); maybeAutoAppendRow(); });
+  iH.addEventListener('input', () => { updatePreview(); toggleAddButton(); recalcEdgebanding(); renderSheetOverview(); persistState && persistState(); maybeAutoAppendRow(); });
   iRot.addEventListener('change', () => {
     row._manualRotWanted = iRot.checked;
     updatePreview();
@@ -2213,6 +2270,7 @@ function makeRow(index) {
     recalcEdgebanding();
     renderSheetOverview();
     persistState && persistState();
+    maybeAutoAppendRow();
   });
 
   // Inicializar
@@ -2269,8 +2327,7 @@ clearAllBtn.addEventListener('click', () => {
 // Crear filas iniciales si no hay (cuando no hay proyecto guardado)
 function ensureDefaultRows() {
   if (currentRowCount() === 0) {
-    const initialRows = isBackofficeAllowed ? 5 : 1;
-    for (let i = 0; i < initialRows; i++) rowsEl.appendChild(makeRow(i));
+    rowsEl.appendChild(makeRow(0));
     toggleAddButton();
   }
 }
@@ -2365,10 +2422,10 @@ function makePlateRow(options = {}) {
   }
   fH.appendChild(lH); fH.appendChild(iH);
 
-  const fC = document.createElement('div'); fC.className = 'field';
-  const lC = document.createElement('label'); lC.textContent = 'Cantidad';
-  const iC = document.createElement('input'); iC.className = 'plate-c'; iC.type = 'number'; iC.min = '1'; iC.step = '1'; iC.value = '1';
-  fC.appendChild(lC); fC.appendChild(iC);
+  const iC = document.createElement('input');
+  iC.className = 'plate-c';
+  iC.type = 'hidden';
+  iC.value = '1';
 
   const trim = document.createElement('div');
   trim.className = 'trim-wrap';
@@ -2411,10 +2468,10 @@ function makePlateRow(options = {}) {
 
   row.appendChild(fW);
   row.appendChild(fH);
-  row.appendChild(fC);
   row.appendChild(actions);
   row.appendChild(trim);
   row.appendChild(kerfSlot);
+  row.appendChild(iC);
 
   if (readOnlySize) {
     onChange();
@@ -2430,6 +2487,7 @@ function applyPlatesGate() {
     if (r._setInputsEnabled) r._setInputsEnabled(enabled);
     if (r._applyAutoRotateForced) r._applyAutoRotateForced(autoEnabled);
   });
+  updateMaterialDropdownState();
   toggleAddButton();
   recalcEdgebanding();
   refreshAllPreviews();
@@ -2484,17 +2542,6 @@ if (platesEl && addPlateBtn) {
     if (!plateMaterialSelect || !plateMaterialSelect.value) return;
     appendPlateRow();
   });
-  // Intentar cargar desde localStorage; si no hay, crear por defecto
-  let loadedFromLS = false;
-  try {
-    loadedFromLS = tryLoadFromLocalStorage();
-  } catch (_) { loadedFromLS = false; }
-  if (!loadedFromLS && isBackofficeAllowed) {
-    if (currentMaterialName) {
-      appendPlateRow();
-    }
-  }
-
   ensureDefaultRows();
 }
 
@@ -2804,7 +2851,6 @@ function clearAllPlates() {
 }
 
 function loadState(state) {
-  if (!isBackofficeAllowed) return;
   clearAllPlates();
   if (projectNameEl && typeof state.name === 'string') projectNameEl.value = state.name;
   if (typeof state.kerfMm === 'number') {
@@ -2842,7 +2888,8 @@ function loadState(state) {
   }
   // Cargar placas
   if (platesEl && Array.isArray(state.plates)) {
-    state.plates.forEach(p => {
+    state.plates.forEach((p, plateIdx) => {
+      if (!isBackofficeAllowed && plateIdx > 0) return; // Solo una placa para usuarios finales
       const rowOptions = isBackofficeAllowed
         ? {}
         : { readOnlySize: true, width: DEFAULT_PLATE_WIDTH, height: DEFAULT_PLATE_HEIGHT };
@@ -2880,6 +2927,13 @@ function loadState(state) {
       }
       platesEl.appendChild(r);
     });
+    if (!isBackofficeAllowed) {
+      const plateRows = platesEl.querySelectorAll('.plate-row');
+      if (!plateRows.length) {
+        const fallbackRow = makePlateRow({ readOnlySize: true, width: DEFAULT_PLATE_WIDTH, height: DEFAULT_PLATE_HEIGHT });
+        platesEl.appendChild(fallbackRow);
+      }
+    }
   }
 
   // Cargar filas de cortes
@@ -2909,7 +2963,6 @@ function loadState(state) {
       if (heightEdgeSelect) {
         populateEdgeSelectOptions(heightEdgeSelect, typeof it.heightEdge === 'string' ? it.heightEdge : '');
       }
-      if (r._updateEdgeSelectState) r._updateEdgeSelectState();
       const rotEl = r.querySelector('.rot-label input');
       if (rotEl) rotEl.checked = !!it.rot;
       if (typeof it.rot === 'boolean') {
@@ -2928,6 +2981,19 @@ function loadState(state) {
         r._syncEdgesFromTier(false);
       }
       if (r._syncTierFromEdges) r._syncTierFromEdges();
+      if (r._updateEdgeSelectState) r._updateEdgeSelectState();
+      const syncSelectDatasets = (select) => {
+        if (!select) return;
+        const active = select.selectedOptions?.[0];
+        if (active && active.value) {
+          const raw = (active.textContent || '').trim();
+          const [base] = raw.split('—');
+          select.dataset.label = (base || raw).trim();
+          select.dataset.value = active.value || '';
+        }
+      };
+      syncSelectDatasets(widthEdgeSelect);
+      syncSelectDatasets(heightEdgeSelect);
       rowsEl.appendChild(r);
     });
   }
@@ -3432,83 +3498,51 @@ function buildSummaryReport() {
   return lines.join('\n');
 }
 
-async function sendPlainEmail({ token, to, subject, text }) {
-  if (!token) throw new Error('Falta el token de acceso para enviar el correo.');
-  const mimeParts = [
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    `to: ${to}`,
-    `subject: ${encodeMimeWord(subject)}`,
-    '',
-    text,
-    ''
-  ];
-  const message = mimeParts.join('\r\n');
-  const messageBytes = new TextEncoder().encode(message);
-  const raw = toBase64UrlFromUint8(messageBytes);
-  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ raw })
-  });
-  if (!response.ok) {
-    let details = '';
-    try {
-      const errorBody = await response.json();
-      details = errorBody?.error?.message ? `: ${errorBody.error.message}` : '';
-    } catch (_) {}
-    throw new Error(`Google respondió ${response.status}${details}`);
+async function sendEmailViaProvider({ from, to, subject, text, attachments = [] }) {
+  const payload = { from, to, subject, text, attachments };
+  if (!from || !to) throw new Error('El remitente y el destinatario son obligatorios.');
+
+  if (typeof window.GenericMailProvider === 'function') {
+    const result = await window.GenericMailProvider(payload);
+    return result ?? null;
   }
-  return response.json();
+
+  if (EMAIL_PROVIDER_ENDPOINT) {
+    const response = await fetch(EMAIL_PROVIDER_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      let details = '';
+      try {
+        const errJson = await response.json();
+        details = errJson?.error ? `: ${errJson.error}` : '';
+      } catch (_) {}
+      throw new Error(`El proveedor respondió ${response.status}${details}`);
+    }
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return response.json().catch(() => null);
+    }
+    return null;
+  }
+
+  console.warn('No hay proveedor de email configurado. Definí window.GenericMailProvider o window.EMAIL_PROVIDER_ENDPOINT.', payload);
+  throw new Error('Proveedor de email no configurado.');
 }
 
-async function sendEmailWithAttachment({ token, to, subject, text, filename, blob }) {
-  if (!token) throw new Error('Falta el token de acceso para enviar el correo.');
-  const pdfBase64 = await blobToBase64(blob);
-  const boundary = `mixed_${Math.random().toString(36).slice(2)}`;
-  const mimeParts = [
-    'MIME-Version: 1.0',
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    `to: ${to}`,
-    `subject: ${encodeMimeWord(subject)}`,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    '',
-    text,
-    '',
-    `--${boundary}`,
-    `Content-Type: application/pdf; name="${filename}"`,
-    'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment; filename="${filename}"`,
-    '',
-    chunkString(pdfBase64),
-    `--${boundary}--`,
-    ''
-  ];
-  const message = mimeParts.join('\r\n');
-  const messageBytes = new TextEncoder().encode(message);
-  const raw = toBase64UrlFromUint8(messageBytes);
-  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ raw })
-  });
-  if (!response.ok) {
-    let details = '';
-    try {
-      const errorBody = await response.json();
-      details = errorBody?.error?.message ? `: ${errorBody.error.message}` : '';
-    } catch (_) {}
-    throw new Error(`Google respondió ${response.status}${details}`);
+async function sendPlainEmail({ from, to, subject, text }) {
+  return sendEmailViaProvider({ from, to, subject, text, attachments: [] });
+}
+
+async function sendEmailWithAttachment({ from, to, subject, text, filename, blob }) {
+  const attachments = [];
+  if (blob && filename) {
+    const base64 = await blobToBase64(blob);
+    attachments.push({ filename, content: base64, mimeType: 'application/pdf' });
   }
-  return response.json();
+  return sendEmailViaProvider({ from, to, subject, text, attachments });
 }
 
 async function handleSendCuts() {
@@ -3524,8 +3558,9 @@ async function handleSendCuts() {
     alert('Iniciá sesión antes de enviar los cortes.');
     return;
   }
-  if (!authUser.accessToken) {
-    alert('No se encontró el token de Google para enviar el correo. Cerrá sesión e ingresá nuevamente.');
+  const fromEmail = (authUser.email || '').trim();
+  if (!fromEmail) {
+    alert('Tu usuario no tiene un correo configurado. Cerrá sesión e ingresá nuevamente.');
     return;
   }
   sendCutsBtn.disabled = true;
@@ -3556,9 +3591,13 @@ async function handleSendCuts() {
     const recipientsSent = [];
     const sendErrors = [];
 
-    const sendTo = async (to, text) => {
+    const sendTo = async (to, text, { attachPdf = true } = {}) => {
+      if (!attachPdf) {
+        await sendPlainEmail({ from: fromEmail, to, subject: `Plano de cortes - ${subjectName}`, text });
+        return;
+      }
       await sendEmailWithAttachment({
-        token: authUser.accessToken,
+        from: fromEmail,
         to,
         subject: `Plano de cortes - ${subjectName}`,
         text,
@@ -3582,12 +3621,7 @@ async function handleSendCuts() {
       const greeting = authUser.name ? `Hola ${authUser.name.trim()},` : 'Hola,';
       const userText = `${greeting}\n\n${bodyText}\n\n${summaryReport}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
       try {
-        await sendPlainEmail({
-          token: authUser.accessToken,
-          to: userEmail,
-          subject: `Plano de cortes - ${subjectName}`,
-          text: userText
-        });
+        await sendTo(userEmail, userText);
         recipientsSent.push(userEmail);
       } catch (err) {
         console.error('No se pudo enviar al usuario final', err);
@@ -3597,6 +3631,9 @@ async function handleSendCuts() {
 
     const downloadNotice = 'También se descargó una copia local para que puedas importarla en la app y seguir editando sin volver a cargar los cortes.';
     if (sendErrors.length) {
+      if (sendErrors.some(msg => /Proveedor de email no configurado/.test(String(msg)))) {
+        sendErrors.push('Configurá window.EMAIL_PROVIDER_ENDPOINT o window.GenericMailProvider para habilitar el envío automático de correos.');
+      }
       const successNote = recipientsSent.length ? `Se envió correctamente a: ${recipientsSent.join(', ')}.` : 'No se pudo completar ningún envío.';
       alert(`${sendErrors.join('\n')}\n${successNote}\n${downloadNotice}`);
     } else {
@@ -4011,7 +4048,9 @@ function renderSheetOverview() {
       svg.appendChild(inner);
 
       if (pxW >= 40 && pxH >= 28) {
-        const fs = clamp(Math.min(pxW, pxH) * 0.16, 9, 15);
+        const baseFs = clamp(Math.min(pxW, pxH) * 0.16, 9, 15);
+        const isSmallPiece = Math.min(r.rawW, r.rawH) < 200;
+        const fontSize = isSmallPiece ? Math.max(5, Math.round(baseFs / 2)) : baseFs;
 
         const widthLabel = document.createElementNS(svgNS, 'text');
         widthLabel.setAttribute('class', 'piece-label');
@@ -4020,7 +4059,7 @@ function renderSheetOverview() {
         widthLabel.setAttribute('dominant-baseline', 'alphabetic');
         widthLabel.setAttribute('x', String(pxX + pxW / 2));
         widthLabel.setAttribute('y', String(pxY + pxH - 21));
-        widthLabel.setAttribute('font-size', String(fs));
+        widthLabel.setAttribute('font-size', String(fontSize));
         widthLabel.textContent = `${formatNumber(r.rawW, 0)}`;
         svg.appendChild(widthLabel);
 
@@ -4030,7 +4069,7 @@ function renderSheetOverview() {
         heightLabel.setAttribute('text-anchor', 'end');
         heightLabel.setAttribute('x', String(pxX + pxW - 25));
         heightLabel.setAttribute('y', String(pxY + pxH / 2));
-        heightLabel.setAttribute('font-size', String(fs));
+        heightLabel.setAttribute('font-size', String(fontSize));
         heightLabel.setAttribute('dominant-baseline', 'middle');
         heightLabel.textContent = `${formatNumber(r.rawH, 0)}`;
         svg.appendChild(heightLabel);
@@ -4062,10 +4101,14 @@ function renderSheetOverview() {
 
       const widthEdgeSelect = rowEl?._edgeSelects?.width || rowEl?.querySelector('select[data-role="width-edge"]');
       const heightEdgeSelect = rowEl?._edgeSelects?.height || rowEl?.querySelector('select[data-role="height-edge"]');
-      const sanitizeLabel = (value, selectEl) => {
-        const trimmed = (value || '').trim();
-        if (trimmed) return trimmed;
+      const labelForEdgeSelect = (selectEl) => {
         if (!selectEl) return '';
+        const directValue = (selectEl.value || '').trim();
+        if (directValue && !/^sin\s+cubre\s*canto/i.test(directValue)) return directValue;
+        const datasetLabel = (selectEl.dataset?.label || '').trim();
+        if (datasetLabel && !/^sin\s+cubre\s*canto/i.test(datasetLabel)) return datasetLabel;
+        const datasetValue = (selectEl.dataset?.value || '').trim();
+        if (datasetValue && !/^sin\s+cubre\s*canto/i.test(datasetValue)) return datasetValue;
         const option = selectEl.selectedOptions?.[0];
         if (!option) return '';
         const raw = (option.textContent || '').trim();
@@ -4073,8 +4116,9 @@ function renderSheetOverview() {
         const [base] = raw.split('—');
         return (base || raw).trim();
       };
-      let horizontalEdgeName = sanitizeLabel(widthEdgeSelect?.value, widthEdgeSelect);
-      let verticalEdgeName = sanitizeLabel(heightEdgeSelect?.value, heightEdgeSelect);
+
+      let horizontalEdgeName = labelForEdgeSelect(widthEdgeSelect);
+      let verticalEdgeName = labelForEdgeSelect(heightEdgeSelect);
 
       if (pieceMeta && baseRot !== finalRot) {
         const swap = horizontalEdgeName;
@@ -4289,19 +4333,6 @@ function renderSheetOverview() {
 
 // Inicializar vista de placa al cargar
 renderSheetOverview();
-
-function tryLoadFromLocalStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return false;
-    loadState(data);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
 
 // Registrar Service Worker para PWA (si el navegador lo soporta)
 if ('serviceWorker' in navigator) {

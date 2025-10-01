@@ -8,6 +8,41 @@
   window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || '44432976099-rhvil13l9qgtjfq3u4ivh6btt1o1nfgg.apps.googleusercontent.com';
   window.GOOGLE_REDIRECT_URI = window.GOOGLE_REDIRECT_URI || `${window.location.origin}/auth-callback.html`;
 
+  function deriveDisplayName(email) {
+  if (!email) return '';
+  const localPart = email.split('@')[0] || '';
+  const cleaned = localPart.replace(/[^a-zA-Z0-9]+/g, ' ').trim();
+  if (!cleaned) return email;
+  return cleaned
+    .split(' ')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+  }
+
+  function completeLogin(user) {
+  if (!user || !user.email) throw new Error('No se puede iniciar sesión sin un correo válido.');
+  const normalizedEmail = String(user.email).trim().toLowerCase();
+  const hydratedUser = {
+    email: normalizedEmail,
+    name: user.name || deriveDisplayName(normalizedEmail),
+    picture: user.picture || '',
+    provider: user.provider || 'manual',
+    loggedInAt: new Date().toISOString(),
+    ...user
+  };
+  hydratedUser.email = normalizedEmail;
+  storeAuthUser(hydratedUser);
+  window.__authUser = hydratedUser;
+  let redirect = 'index.html';
+  try {
+    const stored = localStorage.getItem(POST_LOGIN_REDIRECT_KEY);
+    if (stored) redirect = stored;
+    localStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
+  } catch (_) {}
+  window.location.replace(redirect);
+  }
+
   function storeAuthUser(user) {
   try { sessionStorage.removeItem('cortes_theme_v1'); } catch (_) {}
   try { localStorage.removeItem('cortes_theme_v1'); } catch (_) {}
@@ -112,6 +147,33 @@
 
   document.addEventListener('DOMContentLoaded', () => {
   applyLoginRedirect();
+  const manualLoginForm = document.getElementById('manualLoginForm');
+  if (manualLoginForm) {
+    manualLoginForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const userInput = document.getElementById('loginUserInput');
+      const domainSelect = document.getElementById('loginDomainSelect');
+      const rawUser = (userInput?.value || '').trim();
+      const domain = (domainSelect?.value || '').trim();
+      if (!rawUser) {
+        alert('Ingresá tu nombre de usuario.');
+        userInput?.focus();
+        return;
+      }
+      if (!/^[a-zA-Z0-9._-]+$/.test(rawUser)) {
+        alert('El usuario solo puede contener letras, números, puntos, guiones y guiones bajos.');
+        userInput?.focus();
+        return;
+      }
+      if (!domain) {
+        alert('Seleccioná un dominio válido.');
+        domainSelect?.focus();
+        return;
+      }
+      const email = `${rawUser}@${domain}`.toLowerCase();
+      completeLogin({ email, provider: 'manual' });
+    });
+  }
   document.querySelectorAll('[data-google-login]').forEach((btn) => {
     btn.addEventListener('click', () => {
       startGoogleOAuth(btn.dataset.mode || 'signin');
@@ -130,9 +192,11 @@
     startGoogleOAuth,
     signOut,
     decodeJwt,
-    OAUTH_NONCE_KEY
+    OAUTH_NONCE_KEY,
+    completeLogin
   };
 
   window.ensureAuthenticated = ensureAuthenticated;
   window.startGoogleOAuth = startGoogleOAuth;
+  window.completeLogin = completeLogin;
 })();

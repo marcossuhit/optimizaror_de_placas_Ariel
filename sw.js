@@ -1,11 +1,15 @@
-const CACHE_NAME = 'cortes-cache-v3';
+const CACHE_NAME = 'cortes-cache-v4';
 const PRECACHE = [
   './',
   './index.html',
-  './style.css',
-  './app.js',
   './manifest.webmanifest'
 ];
+const NON_CACHE_PATHS = new Set([
+  '/login.html',
+  '/login2.html',
+  '/auth.js',
+  '/auth-callback.html'
+]);
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -23,9 +27,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+const NETWORK_TIMEOUT_MS = 10000;
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  if (req.method !== 'GET') return;
+
   const url = new URL(req.url);
+
+  if (NON_CACHE_PATHS.has(url.pathname)) {
+    event.respondWith(fetch(req));
+    return;
+  }
 
   // Generar íconos PWA en tiempo de ejecución si no existen como archivos
   if (url.pathname.endsWith('/icons/icon-192.png') || url.pathname.endsWith('/icons/icon-512.png')) {
@@ -73,18 +86,21 @@ self.addEventListener('fetch', (event) => {
     })());
     return;
   }
-  // Estrategia: cache-first para assets, network-first para HTML
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
-    );
-    return;
-  }
-  event.respondWith(
-    caches.match(req).then(cached => cached || fetch(req).then(res => {
-      const resClone = res.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(req, resClone));
-      return res;
-    }).catch(() => cached))
-  );
+  const cacheFallback = () => caches.match(req).then((cached) => cached || fetch('./index.html'));
+
+  event.respondWith((async () => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+      const response = await fetch(req, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (response && response.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(req, response.clone());
+      }
+      return response;
+    } catch (_) {
+      return cacheFallback();
+    }
+  })());
 });

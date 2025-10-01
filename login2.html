@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login · Optimizador de Placas</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-wrapper">
+      <header class="login-header">
+        <h1>Optimizador de Placas</h1>
+        <p>Ingresá con tu cuenta de Google para administrar cortes, stock y optimizar tus placas.</p>
+      </header>
+      <section class="login-actions">
+        <button class="btn primary login-btn" data-google-login data-mode="signin">Ingresar con Google</button>
+        <p class="login-note">Se requiere una cuenta de Google para acceder.</p>
+      </section>
+      <footer class="login-footer">
+        <p>¿Problemas para acceder? Contactá al administrador para habilitar tu cuenta.</p>
+      </footer>
+    </main>
+
+    <script src="email-provider-config.js"></script>
+    <script src="email-provider.js"></script>
+    <script src="auth.js"></script>
+  </body>
+</html>
