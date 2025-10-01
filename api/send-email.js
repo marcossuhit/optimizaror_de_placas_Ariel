@@ -19,34 +19,37 @@ export default async (req, res) => {
     }
 
     const composedFrom = fromName ? `${fromName} <${from}>` : from;
+    const safeText = (text && String(text).trim()) || undefined;
+    const safeHtml = (html && String(html).trim()) || undefined;
 
     const payload = {
       from: composedFrom,
       to: recipients,
       subject,
-      text: text || undefined,
-      html: html || undefined,
+      text: safeText,
+      html: safeHtml,
       attachments: Array.isArray(attachments)
-        ? attachments.map((attachment) => ({
-            filename: attachment.filename,
-            content: attachment.content,
-            path: attachment.path,
-            type: attachment.mimeType || attachment.type
-          }))
+        ? attachments
+            .filter(att => att && att.filename && att.content)
+            .map((attachment) => ({
+              filename: attachment.filename,
+              content: attachment.content,
+              type: attachment.mimeType || attachment.type || 'application/octet-stream'
+            }))
         : undefined
     };
 
     const { data, error } = await resend.emails.send(payload);
 
     if (error) {
-      console.error({ error });
-      return res.status(400).json(error);
+      console.error('[send-email] Resend error', error);
+      return res.status(400).json({ error: error.message || 'No se pudo enviar el correo.' });
     }
 
     // Enviamos una respuesta exitosa al frontend
     res.status(200).json(data);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('[send-email] Unexpected error', error);
+    res.status(500).json({ error: error?.message || 'Internal Server Error' });
   }
 };
