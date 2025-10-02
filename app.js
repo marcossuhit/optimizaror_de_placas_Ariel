@@ -48,7 +48,6 @@ const whatsappLink = document.getElementById('whatsAppLink');
 const WHATSAPP_NUMBER = '542494605850';
 const WHATSAPP_MESSAGE = 'Fernando te envio la planificacion de cortes.';
 const sendCutsDefaultLabel = sendCutsBtn?.textContent || 'Enviar cortes';
-const ALLOWED_ADMIN_EMAILS = new Set(['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com']);
 const StockSync = window.StockSync || null;
 const REMOTE_STOCK_SYNC_ENABLED = !!(StockSync && typeof StockSync.isConfigured === 'function' && StockSync.isConfigured());
 const DEFAULT_PLATE_WIDTH = 2750;
@@ -71,6 +70,7 @@ let lastEdgebandByRow = new Map(); // rowIdx -> mm subtotal
 let lastPlacementByRow = new Map(); // rowIdx -> { requested, placed, left }
 let currentMaterialName = plateMaterialSelect?.value || '';
 const STOCK_STORAGE_KEY = 'stock_items_v1';
+const ADMIN_STORAGE_KEY = 'admin_items_v1';
 const STOCK_TEXT_FALLBACK = 'stock.txt';
 let lastFetchedStockItems = [];
 let lastFeasibleStateSnapshot = null;
@@ -278,6 +278,7 @@ function edgeEntriesEqual(a, b) {
 }
 let remoteStockUnsubscribe = null;
 let remoteEdgeUnsubscribe = null;
+let remoteAdminUnsubscribe = null;
 
 function resetSummaryUI() {
   lastEdgebandByRow.clear();
@@ -296,6 +297,107 @@ function resetSummaryUI() {
 }
 
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
+
+const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com'];
+let adminDirectory = [];
+let allowedAdminEmailSet = new Set();
+let isBackofficeAllowed = false;
+let cachedInventoryText = null;
+
+function normalizeAdminRecords(records) {
+  if (!Array.isArray(records)) return [];
+  return records
+    .map((item) => ({
+      name: String(item?.name || '').trim(),
+      email: String(item?.email || '').trim().toLowerCase()
+    }))
+    .filter((item) => item.name && item.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.email))
+    .map((item) => ({ name: item.name, email: item.email }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+function loadAdminDirectoryFromStorage() {
+  try {
+    const raw = localStorage.getItem(ADMIN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return normalizeAdminRecords(parsed);
+  } catch (_) {
+    return [];
+  }
+}
+
+function persistAdminDirectory(records) {
+  try {
+    localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(records));
+  } catch (_) {}
+}
+
+function updateAllowedAdminEmails(records, { persist = false } = {}) {
+  const normalized = normalizeAdminRecords(records);
+  adminDirectory = normalized;
+  allowedAdminEmailSet = new Set(DEFAULT_ADMIN_EMAILS.map((email) => email.toLowerCase()));
+  normalized.forEach((record) => {
+    allowedAdminEmailSet.add(record.email);
+  });
+  if (persist) {
+    persistAdminDirectory(normalized);
+  }
+}
+
+function computeBackofficeAccess() {
+  const email = (authUser?.email || '').trim().toLowerCase();
+  return !!email && allowedAdminEmailSet.has(email);
+}
+
+function applyBackofficeVisibility() {
+  if (manageStockBtn) manageStockBtn.style.display = isBackofficeAllowed ? '' : 'none';
+  if (exportPdfBtn) exportPdfBtn.style.display = isBackofficeAllowed ? '' : 'none';
+  if (sheetOverviewSection) sheetOverviewSection.style.display = isBackofficeAllowed ? '' : 'none';
+  if (stackSection) stackSection.style.display = '';
+  if (platesEl) platesEl.style.display = '';
+  if (rowsSectionEl) rowsSectionEl.style.display = '';
+  if (rowsHeaderSection) rowsHeaderSection.style.display = '';
+  if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
+}
+
+function refreshBackofficeAccess() {
+  const previous = isBackofficeAllowed;
+  isBackofficeAllowed = computeBackofficeAccess();
+  applyBackofficeVisibility();
+  if (previous !== isBackofficeAllowed && typeof updateMaterialDropdownState === 'function') {
+    updateMaterialDropdownState();
+  }
+}
+
+async function fetchInventoryText() {
+  if (cachedInventoryText) return cachedInventoryText;
+  const response = await fetch(STOCK_TEXT_FALLBACK, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Inventario respondió ${response.status}`);
+  }
+  const text = await response.text();
+  cachedInventoryText = parseInventoryText(text);
+  return cachedInventoryText;
+}
+
+async function ensureAdminDirectoryFromText() {
+  if (REMOTE_STOCK_SYNC_ENABLED) return;
+  const inventory = await fetchInventoryText();
+  updateAllowedAdminEmails(inventory.adminItems, { persist: true });
+  refreshBackofficeAccess();
+}
+
+updateAllowedAdminEmails(loadAdminDirectoryFromStorage());
+refreshBackofficeAccess();
+if (typeof updateMaterialDropdownState === 'function') {
+  updateMaterialDropdownState();
+}
+if (!REMOTE_STOCK_SYNC_ENABLED) {
+  ensureAdminDirectoryFromText().catch((err) => {
+    console.error('App: no se pudo cargar administradores desde stock.txt', err);
+  });
+}
 resetSummaryUI();
 
 if (signOutBtn) {
@@ -337,33 +439,6 @@ if (userSessionEl) {
   }
 }
 
-const isBackofficeAllowed = !!(authUser && ALLOWED_ADMIN_EMAILS.has((authUser.email || '').toLowerCase()));
-if (manageStockBtn && !isBackofficeAllowed) {
-  manageStockBtn.style.display = 'none';
-}
-if (!isBackofficeAllowed) {
-  if (exportPdfBtn) exportPdfBtn.style.display = 'none';
-  if (sheetOverviewSection) sheetOverviewSection.style.display = 'none';
-  if (stackSection) stackSection.style.display = '';
-  if (platesEl) platesEl.style.display = '';
-  if (rowsSectionEl) rowsSectionEl.style.display = '';
-  if (rowsHeaderSection) rowsHeaderSection.style.display = '';
-  if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
-  if (addPlateBtn) {
-    updateMaterialDropdownState();
-  }
-} else {
-  if (sheetOverviewSection) sheetOverviewSection.style.display = '';
-  if (stackSection) stackSection.style.display = '';
-  if (platesEl) platesEl.style.display = '';
-  if (rowsSectionEl) rowsSectionEl.style.display = '';
-  if (rowsHeaderSection) rowsHeaderSection.style.display = '';
-  if (plateLimitNoteEl) plateLimitNoteEl.style.display = '';
-  if (addPlateBtn) {
-    updateMaterialDropdownState();
-  }
-}
-
 function handleRemoteStockUpdate(items) {
   const normalized = normalizeStockEntries(items);
   const changed = !stockEntriesEqual(remoteStockSnapshot || [], normalized);
@@ -390,6 +465,11 @@ function handleRemoteEdgeUpdate(items) {
   }
 }
 
+function handleRemoteAdminUpdate(items) {
+  updateAllowedAdminEmails(items, { persist: true });
+  refreshBackofficeAccess();
+}
+
 function initRemoteSynchronisation() {
   if (!REMOTE_STOCK_SYNC_ENABLED) return;
   try {
@@ -400,11 +480,16 @@ function initRemoteSynchronisation() {
   } catch (_) {}
   if (typeof remoteStockUnsubscribe === 'function') remoteStockUnsubscribe();
   if (typeof remoteEdgeUnsubscribe === 'function') remoteEdgeUnsubscribe();
+  if (typeof remoteAdminUnsubscribe === 'function') remoteAdminUnsubscribe();
   remoteStockUnsubscribe = StockSync.watchStock(handleRemoteStockUpdate);
   remoteEdgeUnsubscribe = StockSync.watchEdges(handleRemoteEdgeUpdate);
+  remoteAdminUnsubscribe = typeof StockSync.watchAdmins === 'function'
+    ? StockSync.watchAdmins(handleRemoteAdminUpdate)
+    : null;
   window.addEventListener('beforeunload', () => {
     if (typeof remoteStockUnsubscribe === 'function') remoteStockUnsubscribe();
     if (typeof remoteEdgeUnsubscribe === 'function') remoteEdgeUnsubscribe();
+    if (typeof remoteAdminUnsubscribe === 'function') remoteAdminUnsubscribe();
   }, { once: true });
   if (typeof StockSync.getStockSnapshot === 'function') {
     StockSync.getStockSnapshot().then((items) => {
@@ -418,6 +503,13 @@ function initRemoteSynchronisation() {
       if (Array.isArray(items) && items.length) handleRemoteEdgeUpdate(items);
     }).catch((err) => {
       console.error('App: error obteniendo snapshot inicial de cubre cantos', err);
+    });
+  }
+  if (typeof StockSync.getAdminSnapshot === 'function') {
+    StockSync.getAdminSnapshot().then((items) => {
+      if (Array.isArray(items)) handleRemoteAdminUpdate(items);
+    }).catch((err) => {
+      console.error('App: error obteniendo administradores remotos', err);
     });
   }
 }
@@ -465,18 +557,36 @@ function getRowColor(idx) {
   return arr[idx % arr.length];
 }
 
-function parseStockText(text) {
-  if (!text) return [];
-  const rows = [];
+function parseInventoryText(text) {
+  const payload = { stockItems: [], adminItems: [] };
+  if (!text) return payload;
   text.split('\n').forEach((line) => {
     const clean = line.trim();
     if (!clean || clean.startsWith('#')) return;
-    const [materialPart, pricePart] = clean.split('|').map((part) => (part ?? '').trim());
+    const parts = clean.split('|').map((part) => (part ?? '').trim());
+    if (!parts.length) return;
+    const type = parts[0].toLowerCase();
+    if (type === 'admin') {
+      const name = parts[1] || '';
+      const email = (parts[2] || '').toLowerCase();
+      if (name && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        payload.adminItems.push({ name, email });
+      }
+      return;
+    }
+    if (type === 'stock') {
+      const material = parts[1] || '';
+      if (!material) return;
+      const price = Number.parseFloat(parts[2]);
+      payload.stockItems.push({ material, price: Number.isFinite(price) ? price : 0 });
+      return;
+    }
+    const materialPart = parts[0];
     if (!materialPart) return;
-    const price = Number.parseFloat(pricePart);
-    rows.push({ material: materialPart, price: Number.isFinite(price) ? price : 0 });
+    const price = Number.parseFloat(parts[1]);
+    payload.stockItems.push({ material: materialPart, price: Number.isFinite(price) ? price : 0 });
   });
-  return rows;
+  return payload;
 }
 
 function loadStockFromStorage() {
@@ -492,10 +602,12 @@ function loadStockFromStorage() {
 
 async function loadStockFromText() {
   try {
-    const response = await fetch(STOCK_TEXT_FALLBACK, { cache: 'no-store' });
-    if (!response.ok) return [];
-    const text = await response.text();
-    return normalizeStockEntries(parseStockText(text));
+    const inventory = await fetchInventoryText();
+    if (!REMOTE_STOCK_SYNC_ENABLED) {
+      updateAllowedAdminEmails(inventory.adminItems, { persist: true });
+      refreshBackofficeAccess();
+    }
+    return normalizeStockEntries(inventory.stockItems);
   } catch (_) {
     return [];
   }
@@ -3949,7 +4061,12 @@ async function handleWhatsAppShare(event) {
   }
 }
 
-if (exportPdfBtn && isBackofficeAllowed) exportPdfBtn.addEventListener('click', exportPDF);
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener('click', () => {
+    if (!isBackofficeAllowed) return;
+    exportPDF();
+  });
+}
 if (sendCutsBtn) {
   sendCutsBtn.addEventListener('click', () => {
     handleSendCuts();

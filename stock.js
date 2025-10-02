@@ -1,6 +1,8 @@
 const STORAGE_KEY = 'stock_items_v1';
 const EDGE_STORAGE_KEY = 'edgeband_items_v1';
+const ADMIN_STORAGE_KEY = 'admin_items_v1';
 const TEXT_FALLBACK = 'stock.txt';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 const materialInput = document.getElementById('stockMaterialInput');
 const priceInput = document.getElementById('stockPriceInput');
@@ -12,6 +14,13 @@ const clearBtn = document.getElementById('clearStockBtn');
 const deleteMaterialBtn = document.getElementById('deleteMaterialBtn');
 const closeWindowBtn = document.getElementById('closeWindowBtn');
 
+const adminPanel = document.getElementById('adminPanel');
+const adminForm = document.getElementById('adminForm');
+const adminNameInput = document.getElementById('adminNameInput');
+const adminEmailInput = document.getElementById('adminEmailInput');
+const adminTableBody = document.getElementById('adminTableBody');
+const deleteAdminBtn = document.getElementById('deleteAdminBtn');
+
 const edgeForm = document.getElementById('edgeForm');
 const edgeNameInput = document.getElementById('edgeNameInput');
 const edgePriceInput = document.getElementById('edgePriceInput');
@@ -20,10 +29,12 @@ const edgeTableBody = document.getElementById('edgeTableBody');
 
 let stockItems = [];
 let edgeItems = [];
+let adminItems = [];
 
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
-const ALLOWED_ADMIN_EMAILS = new Set(['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com']);
-const IS_ADMIN = !!(authUser && ALLOWED_ADMIN_EMAILS.has((authUser.email || '').toLowerCase()));
+const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com'];
+let allowedAdminEmailSet = new Set(DEFAULT_ADMIN_EMAILS.map((email) => email.toLowerCase()));
+let isAdmin = false;
 const StockSync = window.StockSync || null;
 const REMOTE_SYNC_ENABLED = !!(StockSync && typeof StockSync.isConfigured === 'function' && StockSync.isConfigured());
 const SYNC_ACTOR = authUser ? { email: authUser.email || '', name: authUser.name || '' } : null;
@@ -34,6 +45,7 @@ let stockFileHandle = null;
 let stockExportNoticeShown = false;
 let remoteStockUnsubscribe = null;
 let remoteEdgeUnsubscribe = null;
+let remoteAdminUnsubscribe = null;
 
 function normaliseMaterialName(name) {
   return (name || '').trim();
@@ -68,6 +80,48 @@ function normaliseEdgeItems(items) {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
+function normaliseAdminItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      name: normaliseMaterialName(item?.name || ''),
+      email: String(item?.email || '').trim().toLowerCase()
+    }))
+    .filter((item) => item.name && EMAIL_REGEX.test(item.email))
+    .map((item) => ({ name: item.name, email: item.email }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+function computeCurrentAdminStatus() {
+  const email = (authUser?.email || '').trim().toLowerCase();
+  return !!email && allowedAdminEmailSet.has(email);
+}
+
+function applyAdminVisibility() {
+  const showAdminUi = isAdmin;
+  if (form) form.style.display = showAdminUi ? '' : 'none';
+  if (edgeForm) edgeForm.style.display = showAdminUi ? '' : 'none';
+  if (adminPanel) adminPanel.style.display = showAdminUi ? '' : 'none';
+  const stockActions = document.querySelector('.stock-actions');
+  if (stockActions) stockActions.style.display = showAdminUi ? '' : 'none';
+  const stockActionsPanel = document.querySelector('.stock-actions-panel');
+  if (stockActionsPanel) stockActionsPanel.style.display = showAdminUi ? '' : 'none';
+}
+
+function updateAllowedAdminEmails(records, { persist = false } = {}) {
+  const normalized = normaliseAdminItems(records);
+  allowedAdminEmailSet = new Set(DEFAULT_ADMIN_EMAILS.map((email) => email.toLowerCase()));
+  normalized.forEach(({ email }) => allowedAdminEmailSet.add(email));
+  if (persist) cacheLocally(ADMIN_STORAGE_KEY, normalized);
+  const previous = isAdmin;
+  isAdmin = computeCurrentAdminStatus();
+  if (previous !== isAdmin) applyAdminVisibility();
+  return normalized;
+}
+
+updateAllowedAdminEmails(loadFromStorage(ADMIN_STORAGE_KEY) || []);
+applyAdminVisibility();
+
 function stockListsEqual(a, b) {
   if (a === b) return true;
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
@@ -88,6 +142,16 @@ function edgeListsEqual(a, b) {
   return true;
 }
 
+function adminListsEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].email !== b[i].email || a[i].name !== b[i].name) return false;
+  }
+  return true;
+}
+
 function cacheLocally(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
@@ -95,7 +159,7 @@ function cacheLocally(key, value) {
 }
 
 function loadFromStorage(key) {
-  if (!IS_ADMIN) return null;
+  if (!isAdmin && key !== ADMIN_STORAGE_KEY) return null;
   const raw = localStorage.getItem(key);
   if (!raw) return null;
   try {
@@ -103,6 +167,7 @@ function loadFromStorage(key) {
     if (Array.isArray(parsed)) {
       if (key === STORAGE_KEY) return normaliseStockItems(parsed);
       if (key === EDGE_STORAGE_KEY) return normaliseEdgeItems(parsed);
+      if (key === ADMIN_STORAGE_KEY) return normaliseAdminItems(parsed);
       return parsed;
     }
   } catch (_) {
@@ -116,28 +181,47 @@ async function loadFromTextFile() {
     const response = await fetch(TEXT_FALLBACK, { cache: 'no-store' });
     if (!response.ok) return [];
     const text = await response.text();
-    return parseTextContent(text);
+    return parseInventoryText(text);
   } catch (_) {
-    return [];
+    return { stockItems: [], adminItems: [] };
   }
 }
 
-function parseTextContent(text) {
-  if (!text) return [];
-  const rows = [];
+function parseInventoryText(text) {
+  const payload = { stockItems: [], adminItems: [] };
+  if (!text) return payload;
   text.split('\n').forEach((line) => {
     const clean = line.trim();
     if (!clean || clean.startsWith('#')) return;
-    const [materialPart, pricePart] = clean.split('|').map(part => part?.trim() ?? '');
+    const parts = clean.split('|').map((part) => (part ?? '').trim());
+    if (!parts.length) return;
+    const type = parts[0].toLowerCase();
+    if (type === 'admin') {
+      const name = parts[1] || '';
+      const email = (parts[2] || '').toLowerCase();
+      if (name && EMAIL_REGEX.test(email)) {
+        payload.adminItems.push({ name, email });
+      }
+      return;
+    }
+    if (type === 'stock') {
+      const material = parts[1] || '';
+      if (!material) return;
+      const price = Number.parseFloat(parts[2]);
+      payload.stockItems.push({ material, price: Number.isFinite(price) ? price : 0 });
+      return;
+    }
+    // Compatibilidad con formato legacy material|precio
+    const materialPart = parts[0];
     if (!materialPart) return;
-    const price = Number.parseFloat(pricePart);
-    rows.push({ material: materialPart, price: Number.isFinite(price) ? price : 0 });
+    const price = Number.parseFloat(parts[1]);
+    payload.stockItems.push({ material: materialPart, price: Number.isFinite(price) ? price : 0 });
   });
-  return rows;
+  return payload;
 }
 
 function persist(key, value, { sync = true } = {}) {
-  if (!IS_ADMIN) return;
+  if (!isAdmin) return;
   cacheLocally(key, value);
   if (REMOTE_SYNC_ENABLED) {
     if (key === STORAGE_KEY) {
@@ -148,22 +232,37 @@ function persist(key, value, { sync = true } = {}) {
       StockSync.saveEdges(value, { actor: SYNC_ACTOR }).catch((err) => {
         console.error('No se pudo sincronizar cubre cantos remotos', err);
       });
+    } else if (key === ADMIN_STORAGE_KEY && typeof StockSync.saveAdmins === 'function') {
+      StockSync.saveAdmins(value, { actor: SYNC_ACTOR }).catch((err) => {
+        console.error('No se pudo sincronizar administradores remotos', err);
+      });
     }
   }
-  if (sync && key === STORAGE_KEY && AUTO_EXPORT_ON_SAVE) scheduleStockSync();
+  if (sync && (key === STORAGE_KEY || key === ADMIN_STORAGE_KEY) && AUTO_EXPORT_ON_SAVE) scheduleStockSync();
 }
 
 function buildStockText() {
-  const lines = ['# Formato: material|precio'];
+  const lines = [
+    '# Formato: tipo|campo1|campo2',
+    '# stock|Material|Precio',
+    '# admin|Nombre|Correo'
+  ];
+  const adminsForExport = adminItems.length ? adminItems.slice() : normaliseAdminItems(loadFromStorage(ADMIN_STORAGE_KEY) || []);
   stockItems.forEach(({ material, price }) => {
-    lines.push(`${material}|${formatPrice(price)}`);
+    lines.push(`stock|${material}|${formatPrice(price)}`);
   });
+  if (adminsForExport.length) {
+    lines.push('', '# Administradores');
+    adminsForExport.forEach(({ name, email }) => {
+      lines.push(`admin|${name}|${email}`);
+    });
+  }
   return lines.join('\n');
 }
 
 async function exportStockText() {
   const text = buildStockText();
-  if (IS_ADMIN && 'showSaveFilePicker' in window) {
+  if (isAdmin && 'showSaveFilePicker' in window) {
     try {
       if (!stockFileHandle) {
         stockFileHandle = await window.showSaveFilePicker({
@@ -203,7 +302,7 @@ async function exportStockText() {
 }
 
 function scheduleStockSync() {
-  if (!IS_ADMIN) return;
+  if (!isAdmin) return;
   if (stockSyncTimer) clearTimeout(stockSyncTimer);
   stockSyncTimer = setTimeout(() => {
     stockSyncTimer = null;
@@ -211,24 +310,38 @@ function scheduleStockSync() {
   }, 500);
 }
 
-function applyRemoteStockItems(items, { hydrateLocal = IS_ADMIN } = {}) {
+function applyRemoteStockItems(items, { hydrateLocal = isAdmin } = {}) {
   const normalized = normaliseStockItems(items);
   if (stockListsEqual(stockItems, normalized)) return;
   stockItems = normalized;
-  if (hydrateLocal && IS_ADMIN) {
+  if (hydrateLocal && isAdmin) {
     cacheLocally(STORAGE_KEY, stockItems);
   }
   renderStock();
 }
 
-function applyRemoteEdgeItems(items, { hydrateLocal = IS_ADMIN } = {}) {
+function applyRemoteEdgeItems(items, { hydrateLocal = isAdmin } = {}) {
   const normalized = normaliseEdgeItems(items);
   if (edgeListsEqual(edgeItems, normalized)) return;
   edgeItems = normalized;
-  if (hydrateLocal && IS_ADMIN) {
+  if (hydrateLocal && isAdmin) {
     cacheLocally(EDGE_STORAGE_KEY, edgeItems);
   }
   renderEdges();
+}
+
+function applyAdminItems(items, { hydrateLocal = isAdmin } = {}) {
+  const normalized = normaliseAdminItems(items);
+  if (adminListsEqual(adminItems, normalized)) {
+    updateAllowedAdminEmails(normalized, { persist: hydrateLocal });
+    return;
+  }
+  adminItems = normalized;
+  if (hydrateLocal) {
+    cacheLocally(ADMIN_STORAGE_KEY, adminItems);
+  }
+  updateAllowedAdminEmails(adminItems, { persist: hydrateLocal });
+  renderAdmins();
 }
 
 function renderStock() {
@@ -333,6 +446,59 @@ function renderEdges() {
   });
 }
 
+function renderAdmins() {
+  if (!adminTableBody) return;
+  adminTableBody.innerHTML = '';
+  if (!adminItems.length) {
+    const emptyRow = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 3;
+    cell.textContent = 'Sin administradores configurados';
+    cell.className = 'admin-empty';
+    emptyRow.appendChild(cell);
+    adminTableBody.appendChild(emptyRow);
+    return;
+  }
+
+  adminItems.forEach((item, index) => {
+    const row = document.createElement('tr');
+
+    const nameTd = document.createElement('td');
+    const nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'link-button';
+    nameBtn.textContent = item.name;
+    nameBtn.addEventListener('click', () => {
+      if (adminNameInput) adminNameInput.value = item.name;
+      if (adminEmailInput) adminEmailInput.value = item.email;
+      adminNameInput?.focus();
+    });
+    nameTd.appendChild(nameBtn);
+    row.appendChild(nameTd);
+
+    const emailTd = document.createElement('td');
+    emailTd.textContent = item.email;
+    row.appendChild(emailTd);
+
+    const actionsTd = document.createElement('td');
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn danger btn-small';
+    deleteBtn.textContent = 'Quitar';
+    deleteBtn.addEventListener('click', () => {
+      adminItems.splice(index, 1);
+      adminItems = normaliseAdminItems(adminItems);
+      updateAllowedAdminEmails(adminItems, { persist: true });
+      persist(ADMIN_STORAGE_KEY, adminItems);
+      renderAdmins();
+    });
+    actionsTd.appendChild(deleteBtn);
+    row.appendChild(actionsTd);
+
+    adminTableBody.appendChild(row);
+  });
+}
+
 function addOrUpdateItem(material, price) {
   const existing = stockItems.find(item => item.material.toLowerCase() === material.toLowerCase());
   if (existing) {
@@ -358,18 +524,60 @@ function addOrUpdateEdge(name, pricePerMeter) {
   renderEdges();
 }
 
+function addOrUpdateAdmin(name, email) {
+  const normalizedEmail = email.toLowerCase();
+  const existing = adminItems.find((item) => item.email === normalizedEmail);
+  if (existing) {
+    existing.name = name;
+  } else {
+    adminItems.push({ name, email: normalizedEmail });
+  }
+  adminItems = normaliseAdminItems(adminItems);
+  updateAllowedAdminEmails(adminItems, { persist: true });
+  persist(ADMIN_STORAGE_KEY, adminItems);
+  renderAdmins();
+}
+
 function handleDownload() {
   exportStockText();
 }
 
 async function bootstrap() {
   const useRemote = REMOTE_SYNC_ENABLED;
+  let cachedInventoryText = null;
 
-  const loadLocalStockFallback = async () => {
+  const getInventoryFromText = async () => {
+    if (cachedInventoryText) return cachedInventoryText;
+    cachedInventoryText = await loadFromTextFile();
+    return cachedInventoryText;
+  };
+
+  const ensureAdminData = async () => {
+    const storedAdmins = loadFromStorage(ADMIN_STORAGE_KEY);
+    if (Array.isArray(storedAdmins) && storedAdmins.length) {
+      applyAdminItems(storedAdmins, { hydrateLocal: false });
+      return;
+    }
+    if (!useRemote) {
+      const fromText = await getInventoryFromText();
+      applyAdminItems(fromText.adminItems, { hydrateLocal: false });
+    }
+  };
+
+  const loadInventoryFallback = async () => {
     const fromStorage = loadFromStorage(STORAGE_KEY);
-    if (Array.isArray(fromStorage) && fromStorage.length) return normaliseStockItems(fromStorage);
-    const fromText = await loadFromTextFile();
-    return normaliseStockItems(fromText);
+    const storedAdmins = loadFromStorage(ADMIN_STORAGE_KEY);
+    if (Array.isArray(storedAdmins)) {
+      applyAdminItems(storedAdmins, { hydrateLocal: false });
+    }
+    if (Array.isArray(fromStorage) && fromStorage.length) {
+      return normaliseStockItems(fromStorage);
+    }
+    const fromText = await getInventoryFromText();
+    if (!useRemote) {
+      applyAdminItems(fromText.adminItems, { hydrateLocal: false });
+    }
+    return normaliseStockItems(fromText.stockItems);
   };
 
   const loadLocalEdgeFallback = () => {
@@ -378,52 +586,65 @@ async function bootstrap() {
     return [];
   };
 
+  await ensureAdminData();
+  renderAdmins();
+
   if (useRemote) {
-    if (IS_ADMIN && typeof StockSync.requiresAuth === 'function' && StockSync.requiresAuth() && typeof StockSync.ensureFirebaseAuth === 'function') {
+    if (isAdmin && typeof StockSync.requiresAuth === 'function' && StockSync.requiresAuth() && typeof StockSync.ensureFirebaseAuth === 'function') {
       try { StockSync.ensureFirebaseAuth(); } catch (_) {}
     }
-    if (IS_ADMIN) {
+    if (typeof StockSync.getAdminSnapshot === 'function') {
+      try {
+        const remoteAdmins = await StockSync.getAdminSnapshot();
+        if (Array.isArray(remoteAdmins) && remoteAdmins.length) {
+          applyAdminItems(remoteAdmins, { hydrateLocal: isAdmin });
+        }
+      } catch (err) {
+        console.error('Stock: no se pudo cargar administradores remotos, usando respaldo local', err);
+      }
+    }
+    if (isAdmin) {
       try {
         const remote = await StockSync.getStockSnapshot();
         const normalized = normaliseStockItems(remote);
         if (normalized.length) {
           stockItems = normalized;
         } else {
-          stockItems = await loadLocalStockFallback();
+          stockItems = await loadInventoryFallback();
           if (stockItems.length) persist(STORAGE_KEY, stockItems, { sync: false });
         }
       } catch (err) {
         console.error('Stock: no se pudo cargar stock remoto, usando respaldo local', err);
-        stockItems = await loadLocalStockFallback();
+        stockItems = await loadInventoryFallback();
       }
     } else {
       try {
         stockItems = normaliseStockItems(await StockSync.getStockSnapshot());
         if (!stockItems.length) {
-          stockItems = await loadLocalStockFallback();
+          stockItems = await loadInventoryFallback();
         }
       } catch (err) {
         console.error('Stock: error obteniendo stock remoto para cliente', err);
-        stockItems = await loadLocalStockFallback();
+        stockItems = await loadInventoryFallback();
       }
     }
   } else {
-    if (IS_ADMIN) {
+    if (isAdmin) {
       const fromStorage = loadFromStorage(STORAGE_KEY);
       if (Array.isArray(fromStorage) && fromStorage.length) {
         stockItems = normaliseStockItems(fromStorage);
       } else {
-        stockItems = await loadLocalStockFallback();
+        stockItems = await loadInventoryFallback();
         if (stockItems.length) persist(STORAGE_KEY, stockItems, { sync: false });
       }
     } else {
-      stockItems = await loadLocalStockFallback();
+      stockItems = await loadInventoryFallback();
     }
   }
   renderStock();
 
   if (useRemote) {
-    if (IS_ADMIN) {
+    if (isAdmin) {
       try {
         const remoteEdges = await StockSync.getEdgeSnapshot();
         const normalizedEdges = normaliseEdgeItems(remoteEdges);
@@ -446,7 +667,7 @@ async function bootstrap() {
       }
     }
   } else {
-    if (IS_ADMIN) {
+    if (isAdmin) {
       edgeItems = loadLocalEdgeFallback();
     } else {
       edgeItems = [];
@@ -461,24 +682,25 @@ async function bootstrap() {
     remoteEdgeUnsubscribe = StockSync.watchEdges((items) => {
       applyRemoteEdgeItems(items);
     });
+    if (typeof StockSync.watchAdmins === 'function') {
+      remoteAdminUnsubscribe = StockSync.watchAdmins((items) => {
+        applyAdminItems(items, { hydrateLocal: isAdmin });
+      });
+    }
     window.addEventListener('beforeunload', () => {
       if (typeof remoteStockUnsubscribe === 'function') remoteStockUnsubscribe();
       if (typeof remoteEdgeUnsubscribe === 'function') remoteEdgeUnsubscribe();
+      if (typeof remoteAdminUnsubscribe === 'function') remoteAdminUnsubscribe();
     }, { once: true });
   }
 
-  if (!IS_ADMIN) {
-    if (form) form.style.display = 'none';
-    const stockActions = document.querySelector('.stock-actions');
-    if (stockActions) stockActions.style.display = 'none';
-    if (edgeForm) edgeForm.style.display = 'none';
-  }
+  applyAdminVisibility();
 }
 
 if (form) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     if (!materialInput || !priceInput) {
       alert('Formulario de stock no disponible en este momento. Recargá la página e intentá nuevamente.');
       return;
@@ -496,24 +718,67 @@ if (form) {
   });
 }
 
+if (adminForm) {
+  adminForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!isAdmin) return;
+    const name = normaliseMaterialName(adminNameInput?.value || '');
+    const email = String(adminEmailInput?.value || '').trim().toLowerCase();
+    if (!name || !EMAIL_REGEX.test(email)) {
+      alert('Ingresá un nombre y un correo electrónico válido.');
+      return;
+    }
+    addOrUpdateAdmin(name, email);
+    adminForm.reset();
+    adminNameInput?.focus();
+  });
+}
+
+if (deleteAdminBtn) {
+  deleteAdminBtn.addEventListener('click', () => {
+    if (!isAdmin) return;
+    const email = String(adminEmailInput?.value || '').trim().toLowerCase();
+    if (!EMAIL_REGEX.test(email)) {
+      alert('Seleccioná un administrador válido para eliminar.');
+      return;
+    }
+    const index = adminItems.findIndex((item) => item.email === email);
+    if (index === -1) {
+      alert('Ese administrador no está en la lista.');
+      return;
+    }
+    if (!confirm(`¿Quitar el acceso de ${adminItems[index].name || adminItems[index].email}?`)) return;
+    adminItems.splice(index, 1);
+    adminItems = normaliseAdminItems(adminItems);
+    updateAllowedAdminEmails(adminItems, { persist: true });
+    persist(ADMIN_STORAGE_KEY, adminItems);
+    renderAdmins();
+    adminForm?.reset();
+    adminNameInput?.focus();
+  });
+}
+
 if (downloadBtn) {
   downloadBtn.addEventListener('click', (event) => {
     event.preventDefault();
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     handleDownload();
   });
 }
 
 if (importInput) {
   importInput.addEventListener('change', () => {
-    if (!IS_ADMIN) { importInput.value = ''; return; }
+    if (!isAdmin) { importInput.value = ''; return; }
     const file = importInput.files && importInput.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result || '');
-      stockItems = normaliseStockItems(parseTextContent(text));
+      const parsed = parseInventoryText(text);
+      stockItems = normaliseStockItems(parsed.stockItems);
       persist(STORAGE_KEY, stockItems);
+      applyAdminItems(parsed.adminItems);
+      renderAdmins();
       renderStock();
       importInput.value = '';
     };
@@ -523,7 +788,7 @@ if (importInput) {
 
 if (clearBtn) {
   clearBtn.addEventListener('click', () => {
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     if (!stockItems.length) return;
     if (!confirm('¿Vaciar todo el stock?')) return;
     stockItems = [];
@@ -534,7 +799,7 @@ if (clearBtn) {
 
 if (deleteMaterialBtn) {
   deleteMaterialBtn.addEventListener('click', () => {
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     if (!materialInput) {
       alert('Seleccioná un material desde la tabla antes de eliminar.');
       return;
@@ -568,7 +833,7 @@ if (deleteMaterialBtn) {
 if (edgeForm) {
   edgeForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     const name = normaliseMaterialName(edgeNameInput.value);
     const price = Number.parseFloat(edgePriceInput.value);
     if (!name || !Number.isFinite(price) || price < 0) {
@@ -583,7 +848,7 @@ if (edgeForm) {
 
 if (edgeDeleteBtn) {
   edgeDeleteBtn.addEventListener('click', () => {
-    if (!IS_ADMIN) return;
+    if (!isAdmin) return;
     const name = normaliseMaterialName(edgeNameInput.value);
     if (!name) {
       alert('Seleccioná un cubre canto para eliminar.');

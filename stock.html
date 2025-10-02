@@ -13,6 +13,37 @@
         <a href="#" id="closeWindowBtn" class="btn">Volver al planificador</a>
       </header>
 
+      <section class="stock-panel admin-panel" id="adminPanel">
+        <h2>Administradores</h2>
+        <p class="admin-panel-description">Gestioná quién puede acceder al backoffice. Los administradores se guardan junto con el archivo de stock.</p>
+        <form id="adminForm" class="admin-form">
+          <div class="admin-form-grid">
+            <label>
+              Nombre completo
+              <input id="adminNameInput" type="text" placeholder="Ej: Ana Pérez" required />
+            </label>
+            <label>
+              Correo electrónico
+              <input id="adminEmailInput" type="email" placeholder="admin@ejemplo.com" required />
+            </label>
+          </div>
+          <div class="admin-form-actions">
+            <button type="submit" class="btn primary">Agregar administrador</button>
+            <button type="button" id="deleteAdminBtn" class="btn danger">Eliminar administrador</button>
+          </div>
+        </form>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Correo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="adminTableBody"></tbody>
+        </table>
+      </section>
+
       <section class="stock-panel">
         <h2>Agregar placa al stock</h2>
         <form id="stockForm" class="stock-form">
@@ -43,16 +74,10 @@
           </thead>
           <tbody id="stockTableBody"></tbody>
         </table>
-        <div class="stock-actions">
-          <button id="downloadStockBtn" class="btn">Descargar stock.txt</button>
-          <label class="btn btn-secondary" for="importStockInput">Importar stock.txt</label>
-          <input id="importStockInput" type="file" accept="text/plain" style="display:none" />
-          <button id="clearStockBtn" class="btn danger">Vaciar stock</button>
-        </div>
       </section>
 
       <section class="stock-panel">
-        <h2>Tipos de cubre canto</h2>
+        <h2>Agregar cubre canto</h2>
         <form id="edgeForm" class="stock-form">
           <label>
             Nombre / acabado
@@ -67,6 +92,10 @@
             <button type="button" id="deleteEdgeBtn" class="btn danger">Eliminar cubre canto</button>
           </div>
         </form>
+      </section>
+
+      <section class="stock-panel">
+        <h2>Listado de cubre cantos</h2>
         <table class="stock-table">
           <thead>
             <tr>
@@ -77,6 +106,17 @@
           </thead>
           <tbody id="edgeTableBody"></tbody>
         </table>
+      </section>
+
+      <section class="stock-actions-panel">
+        <div class="stock-actions">
+          <div class="stock-actions-buttons">
+            <button id="downloadStockBtn" class="btn">Descargar stock.txt</button>
+            <label class="btn btn-secondary" for="importStockInput">Importar stock.txt</label>
+            <input id="importStockInput" type="file" accept="text/plain" style="display:none" />
+          </div>
+          <button id="clearStockBtn" class="btn danger">Vaciar stock</button>
+        </div>
       </section>
     </main>
 

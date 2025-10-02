@@ -14,9 +14,12 @@
     lastDoc: null,
     cachedStock: null,
     cachedEdges: null,
+    cachedAdmins: null,
+    authDisabled: false,
     watchers: {
       stock: new Set(),
-      edges: new Set()
+      edges: new Set(),
+      admins: new Set()
     }
   };
 
@@ -122,6 +125,7 @@
   async function ensureFirebaseAuth() {
     const cfg = getConfig();
     if (!cfg.enabled || !cfg.requireAuthForWrites) return null;
+    if (state.authDisabled) return null;
     await ensureFirestore();
     if (!firebase || typeof firebase.auth !== 'function') return null;
     const auth = firebase.auth();
@@ -135,6 +139,13 @@
       const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
       await auth.signInWithCredential(credential);
     } catch (err) {
+      const code = err?.code || err?.message || '';
+      const isProviderDisabled = typeof code === 'string' && code.includes('operation-not-allowed');
+      if (isProviderDisabled) {
+        state.authDisabled = true;
+        console.warn('StockSync: autenticación deshabilitada en Firebase Auth. Desactiva requireAuthForWrites o habilitá el proveedor en Firebase.');
+        return auth;
+      }
       console.error('StockSync: no se pudo autenticar con Firebase Auth', err);
     }
     return auth;
@@ -174,6 +185,18 @@
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   }
 
+  function normaliseAdminItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((item) => ({
+        name: String(item?.name || '').trim(),
+        email: String(item?.email || '').trim().toLowerCase()
+      }))
+      .filter((item) => item.name && item.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.email))
+      .map((item) => ({ name: item.name, email: item.email }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
   function emit(type, payload, metadata) {
     const listeners = state.watchers[type];
     if (!listeners || !listeners.size) return;
@@ -191,6 +214,7 @@
     state.lastDoc = data;
     state.cachedStock = normaliseStockItems(data.stockItems);
     state.cachedEdges = normaliseEdgeItems(data.edgeItems);
+    state.cachedAdmins = normaliseAdminItems(data.adminItems);
     const metadata = {
       updatedAt: data.stockUpdatedAt || data.updatedAt || null,
       updatedBy: data.stockUpdatedBy || null,
@@ -203,6 +227,7 @@
       raw: data
     };
     emit('edges', state.cachedEdges, edgeMetadata);
+    emit('admins', state.cachedAdmins, metadata);
   }
 
   async function ensureRealtimeListener() {
@@ -226,10 +251,13 @@
     if (type === 'edges' && Array.isArray(state.cachedEdges)) {
       callback(state.cachedEdges.slice(), { raw: state.lastDoc });
     }
+    if (type === 'admins' && Array.isArray(state.cachedAdmins)) {
+      callback(state.cachedAdmins.slice(), { raw: state.lastDoc });
+    }
     ensureRealtimeListener();
     return () => {
       listeners.delete(callback);
-      if (!state.watchers.stock.size && !state.watchers.edges.size && state.unsubscribe) {
+      if (!state.watchers.stock.size && !state.watchers.edges.size && !state.watchers.admins.size && state.unsubscribe) {
         state.unsubscribe();
         state.unsubscribe = null;
       }
@@ -240,6 +268,7 @@
     if (!isConfigured()) return [];
     if (field === 'stock' && Array.isArray(state.cachedStock)) return state.cachedStock.slice();
     if (field === 'edges' && Array.isArray(state.cachedEdges)) return state.cachedEdges.slice();
+    if (field === 'admins' && Array.isArray(state.cachedAdmins)) return state.cachedAdmins.slice();
     const ref = await getDocRef();
     if (!ref) return [];
     try {
@@ -248,6 +277,7 @@
       handleSnapshot(snap);
       if (field === 'stock') return state.cachedStock.slice();
       if (field === 'edges') return state.cachedEdges.slice();
+      if (field === 'admins') return state.cachedAdmins.slice();
       return [];
     } catch (err) {
       console.error('StockSync: no se pudo obtener snapshot', err);
@@ -284,6 +314,15 @@
           name: actor.name || ''
         };
       }
+    } else if (kind === 'admins') {
+      base.adminItems = normaliseAdminItems(items);
+      if (timestamp) base.adminsUpdatedAt = timestamp;
+      if (actor) {
+        base.adminsUpdatedBy = {
+          email: actor.email || '',
+          name: actor.name || ''
+        };
+      }
     }
     if (timestamp) base.updatedAt = timestamp;
     return base;
@@ -316,10 +355,13 @@
     ensureReady: ensureFirestore,
     watchStock: (cb) => subscribe('stock', cb),
     watchEdges: (cb) => subscribe('edges', cb),
+    watchAdmins: (cb) => subscribe('admins', cb),
     getStockSnapshot: () => getSnapshotField('stock'),
     getEdgeSnapshot: () => getSnapshotField('edges'),
+    getAdminSnapshot: () => getSnapshotField('admins'),
     saveStock: (items, options) => saveItems('stock', items, options),
     saveEdges: (items, options) => saveItems('edges', items, options),
+    saveAdmins: (items, options) => saveItems('admins', items, options),
     getLastMetadata,
     signOutFirebase: signOutFirebaseAuth,
     ensureFirebaseAuth,

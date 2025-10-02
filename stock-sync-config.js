@@ -11,5 +11,6 @@ window.STOCK_SYNC_CONFIG = window.STOCK_SYNC_CONFIG || {
     appId: '1:644850544621:web:2a27f4f4aff6afab30c1e4'
   },
   collection: 'inventory',
-  document: 'shared'
+  document: 'shared',
+  requireAuthForWrites: false
 };
