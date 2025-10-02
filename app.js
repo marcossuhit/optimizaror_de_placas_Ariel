@@ -3620,9 +3620,25 @@ function buildSummaryReport() {
   return lines.join('\n');
 }
 
-async function sendEmailViaProvider({ from, to, subject, text, attachments = [] }) {
-  const payload = { from, to, subject, text, attachments };
-  if (!from || !to) throw new Error('El remitente y el destinatario son obligatorios.');
+async function sendEmailViaProvider({ from, to, subject, text, attachments = [], replyTo }) {
+  if (!to) throw new Error('El destinatario es obligatorio.');
+  const senderOverride = (window.EMAIL_PROVIDER_CONFIG?.fromOverride || '').trim();
+  const normalizedFrom = senderOverride || from;
+  if (!normalizedFrom) throw new Error('No hay remitente configurado para el correo.');
+  const payload = {
+    from: normalizedFrom,
+    to,
+    subject,
+    text,
+    attachments
+  };
+  if (window.EMAIL_PROVIDER_CONFIG?.fromName) {
+    payload.fromName = window.EMAIL_PROVIDER_CONFIG.fromName;
+  }
+  const effectiveReplyTo = replyTo || (senderOverride && from && from !== senderOverride ? from : undefined);
+  if (effectiveReplyTo) {
+    payload.replyTo = effectiveReplyTo;
+  }
 
   if (typeof window.sendViaApi === 'function') {
     const result = await window.sendViaApi(payload);
@@ -3660,7 +3676,7 @@ async function sendEmailViaProvider({ from, to, subject, text, attachments = [] 
 }
 
 async function sendPlainEmail({ from, to, subject, text }) {
-  return sendEmailViaProvider({ from, to, subject, text, attachments: [] });
+  return sendEmailViaProvider({ from, to, subject, text, attachments: [], replyTo: from });
 }
 
 async function sendEmailWithAttachment({ from, to, subject, text, filename, blob }) {
@@ -3669,7 +3685,7 @@ async function sendEmailWithAttachment({ from, to, subject, text, filename, blob
     const base64 = await blobToBase64(blob);
     attachments.push({ filename, content: base64, mimeType: 'application/pdf' });
   }
-  return sendEmailViaProvider({ from, to, subject, text, attachments });
+  return sendEmailViaProvider({ from, to, subject, text, attachments, replyTo: from });
 }
 
 async function handleSendCuts() {

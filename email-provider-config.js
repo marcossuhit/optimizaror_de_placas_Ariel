@@ -1,12 +1,12 @@
 /*
  * Configuración del proveedor de email.
- * Reemplazá el valor de apiKey por tu clave privada de Resend
- * (https://resend.com). También podés ajustar el nombre que
- * aparecerá en los correos salientes.
+ * Para usar Gmail SMTP configurá las variables de entorno
+ * GMAIL_SMTP_USER y GMAIL_SMTP_PASS (o GMAIL_SMTP_APP_PASSWORD)
+ * y opcionalmente GMAIL_SMTP_FROM_NAME en el servidor.
  */
 window.EMAIL_PROVIDER_CONFIG = {
-  service: 'vercel-api',
+  service: 'gmail-smtp',
   apiEndpoint: '/api/send-email',
   fromName: 'Optimizador de Placas',
-  fromOverride: 'no-reply@placasfernando.com.ar'
+  fromOverride: 'marcossuhit@gmail.com'
 };
