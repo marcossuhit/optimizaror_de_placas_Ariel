@@ -2602,7 +2602,9 @@ addRowBtn.addEventListener('click', () => {
 });
 
 clearAllBtn.addEventListener('click', () => {
-  rowsEl.innerHTML = '';
+  clearAllRows();
+  rowsEl.appendChild(makeRow(currentRowCount()));
+  reindexRows();
   applyPlatesGate();
 });
 
