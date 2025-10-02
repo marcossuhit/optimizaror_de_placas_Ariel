@@ -3734,6 +3734,7 @@ async function handleSendCuts() {
     const recipientsSent = [];
     const sendErrors = [];
 
+    const buildCommonBody = () => `${bodyText}\n\n${summaryReport}`;
     const sendTo = async (to, text, { attachPdf = true } = {}) => {
       if (!attachPdf) {
         await sendPlainEmail({ from: fromEmail, to, subject: `Plano de cortes - ${subjectName}`, text });
@@ -3751,7 +3752,7 @@ async function handleSendCuts() {
 
     if (adminEmail) {
       try {
-        await sendTo(adminEmail, `${bodyText}\n\n${summaryReport}`);
+        await sendTo(adminEmail, buildCommonBody());
         recipientsSent.push(adminEmail);
       } catch (err) {
         console.error('No se pudo enviar al administrador', err);
@@ -3762,9 +3763,9 @@ async function handleSendCuts() {
     const userEmail = (authUser.email || '').trim();
     if (userEmail) {
       const greeting = authUser.name ? `Hola ${authUser.name.trim()},` : 'Hola,';
-      const userText = `${greeting}\n\n${bodyText}\n\n${summaryReport}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
+      const userText = `${greeting}\n\n${buildCommonBody()}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
       try {
-        await sendTo(userEmail, userText);
+        await sendTo(userEmail, userText, { attachPdf: false });
         recipientsSent.push(userEmail);
       } catch (err) {
         console.error('No se pudo enviar al usuario final', err);
