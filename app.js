@@ -162,8 +162,7 @@ function showAppDialog({ title = 'Aviso', message = '', tone = 'info' } = {}) {
 
   const body = document.createElement('div');
   body.className = 'app-dialog-body';
-  const linesSource = Array.isArray(message) ? message : String(message ?? '').split(/
-+/);
+  const linesSource = Array.isArray(message) ? message : String(message ?? '').split(/\n+/);
   const lines = linesSource.map((line) => String(line || '').trim()).filter((line) => line.length > 0);
   if (!lines.length) {
     lines.push('');
