@@ -3919,7 +3919,7 @@ async function handleSendCuts() {
     const subjectName = rawName || title || 'Plano de cortes';
     const bodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
     const summaryReport = buildSummaryReport();
-    const adminEmail = 'marcossuhit@gmail.com';
+    const adminEmail = 'fernandofreireadrian@gmail.com';
     const recipientsSent = [];
     const sendErrors = [];
 
