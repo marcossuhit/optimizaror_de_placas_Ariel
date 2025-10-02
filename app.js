@@ -139,6 +139,82 @@ function scheduleLayoutRecalc({ immediate = false } = {}) {
 
 updateRecalcButtonState();
 
+function showAppDialog({ title = 'Aviso', message = '', tone = 'info' } = {}) {
+  const normalizedTone = ['success', 'error', 'warning'].includes(tone) ? tone : 'info';
+  const existing = document.querySelector('.app-dialog-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'app-dialog-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = `app-dialog app-dialog-${normalizedTone}`;
+  dialog.setAttribute('role', 'alertdialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.tabIndex = -1;
+
+  const header = document.createElement('header');
+  header.className = 'app-dialog-header';
+  if (title) {
+    const h2 = document.createElement('h2');
+    h2.textContent = title;
+    header.appendChild(h2);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'app-dialog-body';
+  const linesSource = Array.isArray(message) ? message : String(message ?? '').split(/
++/);
+  const lines = linesSource.map((line) => String(line || '').trim()).filter((line) => line.length > 0);
+  if (!lines.length) {
+    lines.push('');
+  }
+  for (const line of lines) {
+    const p = document.createElement('p');
+    p.textContent = line;
+    body.appendChild(p);
+  }
+
+  const actions = document.createElement('footer');
+  actions.className = 'app-dialog-actions';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = normalizedTone === 'success' ? 'btn primary' : 'btn';
+  closeBtn.textContent = 'Aceptar';
+
+  function closeDialog() {
+    overlay.remove();
+    document.body.classList.remove('dialog-open');
+    document.removeEventListener('keydown', onKeyDown);
+  }
+
+  function onKeyDown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeDialog();
+    }
+  }
+
+  closeBtn.addEventListener('click', () => closeDialog());
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeDialog();
+    }
+  });
+
+  document.addEventListener('keydown', onKeyDown);
+
+  actions.appendChild(closeBtn);
+  dialog.append(header, body, actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  document.body.classList.add('dialog-open');
+
+  dialog.focus();
+  setTimeout(() => closeBtn.focus(), 0);
+
+  return closeDialog;
+}
+
 function attachNumericFilter(input, { allowBlank = true } = {}) {
   if (!input) return;
   input.inputMode = 'numeric';
@@ -3693,17 +3769,17 @@ async function handleSendCuts() {
   if (sendCutsBtn.disabled) return;
   const projectName = (projectNameEl?.value || '').trim();
   if (!projectName) {
-    alert('Ingresá un nombre de proyecto antes de enviar.');
+    showAppDialog({ title: 'Falta el nombre del proyecto', message: 'Ingresá un nombre de proyecto antes de enviar.', tone: 'error' });
     projectNameEl?.focus();
     return;
   }
   if (!authUser) {
-    alert('Iniciá sesión antes de enviar los cortes.');
+    showAppDialog({ title: 'Necesitás iniciar sesión', message: 'Iniciá sesión antes de enviar los cortes.', tone: 'warning' });
     return;
   }
   const fromEmail = (authUser.email || '').trim();
   if (!fromEmail) {
-    alert('Tu usuario no tiene un correo configurado. Cerrá sesión e ingresá nuevamente.');
+    showAppDialog({ title: 'Correo faltante', message: 'Tu usuario no tiene un correo configurado. Cerrá sesión e ingresá nuevamente.', tone: 'error' });
     return;
   }
   sendCutsBtn.disabled = true;
@@ -3779,14 +3855,26 @@ async function handleSendCuts() {
         sendErrors.push('Configurá window.EMAIL_PROVIDER_ENDPOINT o window.GenericMailProvider para habilitar el envío automático de correos.');
       }
       const successNote = recipientsSent.length ? `Se envió correctamente a: ${recipientsSent.join(', ')}.` : 'No se pudo completar ningún envío.';
-      alert(`${sendErrors.join('\n')}\n${successNote}\n${downloadNotice}`);
+      showAppDialog({
+        title: 'Envío de correo con advertencias',
+        message: `${sendErrors.join('\n')}\n${successNote}\n${downloadNotice}`,
+        tone: 'warning'
+      });
     } else {
       const recipientLabel = recipientsSent.length ? recipientsSent.join(', ') : 'los destinatarios configurados';
-      alert(`Se envió ${filename} a ${recipientLabel}.\n${downloadNotice}`);
+      showAppDialog({
+        title: 'Correo enviado',
+        message: `Se envió ${filename} a ${recipientLabel}.\n${downloadNotice}`,
+        tone: 'success'
+      });
     }
   } catch (err) {
     console.error(err);
-    alert(`No se pudo enviar el correo: ${err?.message || err}`);
+    showAppDialog({
+      title: 'Error al enviar',
+      message: `No se pudo enviar el correo: ${err?.message || err}`,
+      tone: 'error'
+    });
   } finally {
     delete sendCutsBtn.dataset.busy;
     sendCutsBtn.textContent = sendCutsDefaultLabel;

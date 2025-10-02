@@ -761,3 +761,89 @@ body.theme-light .ghost-btn:hover { background: rgba(148, 163, 184, 0.2); }
 .login-note { font-size: .85rem; color: #94a3b8; text-align: center; margin: 0; }
 
 .login-footer { margin-top: 32px; text-align: center; color: #94a3b8; font-size: .85rem; }
+
+body.dialog-open {
+  overflow: hidden;
+}
+
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 23, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.app-dialog {
+  background: linear-gradient(180deg, #0b1222, #111827);
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  width: min(420px, 100%);
+  padding: 24px 24px 20px;
+  box-shadow: 0 20px 60px rgba(12, 18, 32, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.app-dialog-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--text);
+}
+
+.app-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.app-dialog-body p {
+  margin: 0;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.app-dialog-actions .btn {
+  min-width: 96px;
+}
+
+.app-dialog-success {
+  border-color: rgba(34, 197, 94, 0.45);
+  box-shadow: 0 20px 60px rgba(22, 163, 74, 0.25);
+}
+
+.app-dialog-success .app-dialog-header h2 {
+  color: #bbf7d0;
+}
+
+.app-dialog-warning {
+  border-color: rgba(251, 191, 36, 0.45);
+  box-shadow: 0 20px 60px rgba(251, 191, 36, 0.2);
+}
+
+.app-dialog-warning .app-dialog-header h2 {
+  color: #fcd34d;
+}
+
+.app-dialog-error {
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 20px 60px rgba(239, 68, 68, 0.2);
+}
+
+.app-dialog-error .app-dialog-header h2 {
+  color: #fecaca;
+}
+
+.app-dialog .btn {
+  font-weight: 600;
+}
