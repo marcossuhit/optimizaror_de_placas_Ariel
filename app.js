@@ -1907,6 +1907,7 @@ function makeRow(index) {
   row.dataset.rowIdx = String(index);
   row._manualRotWanted = false;
   row._inputsEnabled = true;
+  row._edgeNames = { horizontal: '', vertical: '' };
 
   // Índice de fila
   const fIdx = document.createElement('div');
@@ -2055,8 +2056,8 @@ function makeRow(index) {
     return {
       previewVertical,
       previewHorizontal,
-      verticalCount: Math.max(previewVertical, widthTierVal),
-      horizontalCount: Math.max(previewHorizontal, heightTierVal),
+      verticalCount: Math.max(previewVertical, heightTierVal),
+      horizontalCount: Math.max(previewHorizontal, widthTierVal),
       widthTierVal,
       heightTierVal,
       leftSelected,
@@ -2136,6 +2137,28 @@ function makeRow(index) {
   tierInputs.forEach((input) => {
     input.addEventListener('input', () => handleTierInputChange(input));
   });
+  const deriveEdgeDisplayName = (select) => {
+    if (!select) return '';
+    const directValue = (select.value || '').trim();
+    if (directValue && !/^sin\s+cubre\s*canto/i.test(directValue)) return directValue;
+    const datasetLabel = (select.dataset?.label || '').trim();
+    if (datasetLabel && !/^sin\s+cubre\s*canto/i.test(datasetLabel)) return datasetLabel;
+    const datasetValue = (select.dataset?.value || '').trim();
+    if (datasetValue && !/^sin\s+cubre\s*canto/i.test(datasetValue)) return datasetValue;
+    const option = select.selectedOptions?.[0];
+    if (!option) return '';
+    const raw = (option.textContent || '').trim();
+    if (!raw || /^sin\s+cubre\s*canto/i.test(raw)) return '';
+    const [base] = raw.split('—');
+    return (base || raw).trim();
+  };
+
+  const syncStoredEdgeNames = () => {
+    if (!row._edgeNames) row._edgeNames = { horizontal: '', vertical: '' };
+    row._edgeNames.horizontal = deriveEdgeDisplayName(wEdgeSelect);
+    row._edgeNames.vertical = deriveEdgeDisplayName(hEdgeSelect);
+  };
+
   const handleEdgeSelectChange = () => {
     const syncLabelDataset = (select) => {
       if (!select) return;
@@ -2152,6 +2175,7 @@ function makeRow(index) {
     };
     syncLabelDataset(wEdgeSelect);
     syncLabelDataset(hEdgeSelect);
+    syncStoredEdgeNames();
     scheduleLayoutRecalc();
     if (typeof persistState === 'function') persistState();
   };
@@ -2165,9 +2189,13 @@ function makeRow(index) {
       return;
     }
     const { verticalCount, horizontalCount } = computeEdgeCounts();
+    const hasHorizontalEdges = horizontalCount > 0;
+    const hasVerticalEdges = verticalCount > 0;
     const states = [
-      { select: wEdgeSelect, enable: verticalCount > 0 },
-      { select: hEdgeSelect, enable: horizontalCount > 0 }
+      // Selector colocado en la columna "Ancho" (bordes superiores/inferiores)
+      { select: wEdgeSelect, enable: hasHorizontalEdges },
+      // Selector en la columna "Alto" (bordes izquierdos/derechos)
+      { select: hEdgeSelect, enable: hasVerticalEdges }
     ];
     let cleared = false;
     states.forEach(({ select, enable }) => {
@@ -2262,8 +2290,8 @@ function makeRow(index) {
   };
 
   function updateTierInputsFromEdges() {
-    const widthCount = (edges.left.dataset.selected === '1' ? 1 : 0) + (edges.right.dataset.selected === '1' ? 1 : 0);
-    const heightCount = (edges.top.dataset.selected === '1' ? 1 : 0) + (edges.bottom.dataset.selected === '1' ? 1 : 0);
+    const widthCount = (edges.top.dataset.selected === '1' ? 1 : 0) + (edges.bottom.dataset.selected === '1' ? 1 : 0);
+    const heightCount = (edges.left.dataset.selected === '1' ? 1 : 0) + (edges.right.dataset.selected === '1' ? 1 : 0);
     const widthStr = String(widthCount);
     const heightStr = String(heightCount);
     if (iWLevel.value !== widthStr) iWLevel.value = widthStr;
@@ -2290,31 +2318,12 @@ function makeRow(index) {
     heightVal = clamp(heightVal, 0, 2);
     if (String(heightVal) !== iHLevel.value) iHLevel.value = String(heightVal);
 
-    const leftSelected = edges.left.dataset.selected === '1';
-    const rightSelected = edges.right.dataset.selected === '1';
-    if (widthVal === 0) {
-      setEdgeSelected(edges.left, false, true);
-      setEdgeSelected(edges.right, false, true);
-    } else if (widthVal === 1) {
-      if (leftSelected && !rightSelected) {
-        setEdgeSelected(edges.right, false, true);
-      } else if (rightSelected && !leftSelected) {
-        setEdgeSelected(edges.left, false, true);
-      } else {
-        setEdgeSelected(edges.left, true, true);
-        setEdgeSelected(edges.right, false, true);
-      }
-    } else {
-      setEdgeSelected(edges.left, true, true);
-      setEdgeSelected(edges.right, true, true);
-    }
-
     const topSelected = edges.top.dataset.selected === '1';
     const bottomSelected = edges.bottom.dataset.selected === '1';
-    if (heightVal === 0) {
+    if (widthVal === 0) {
       setEdgeSelected(edges.top, false, true);
       setEdgeSelected(edges.bottom, false, true);
-    } else if (heightVal === 1) {
+    } else if (widthVal === 1) {
       if (topSelected && !bottomSelected) {
         setEdgeSelected(edges.bottom, false, true);
       } else if (bottomSelected && !topSelected) {
@@ -2326,6 +2335,25 @@ function makeRow(index) {
     } else {
       setEdgeSelected(edges.top, true, true);
       setEdgeSelected(edges.bottom, true, true);
+    }
+
+    const leftSelected = edges.left.dataset.selected === '1';
+    const rightSelected = edges.right.dataset.selected === '1';
+    if (heightVal === 0) {
+      setEdgeSelected(edges.left, false, true);
+      setEdgeSelected(edges.right, false, true);
+    } else if (heightVal === 1) {
+      if (leftSelected && !rightSelected) {
+        setEdgeSelected(edges.right, false, true);
+      } else if (rightSelected && !leftSelected) {
+        setEdgeSelected(edges.left, false, true);
+      } else {
+        setEdgeSelected(edges.left, true, true);
+        setEdgeSelected(edges.right, false, true);
+      }
+    } else {
+      setEdgeSelected(edges.left, true, true);
+      setEdgeSelected(edges.right, true, true);
     }
 
     updateTierInputsFromEdges();
@@ -2384,6 +2412,7 @@ function makeRow(index) {
   row._refreshEdgeSelects = () => {
     populateEdgeSelectOptions(wEdgeSelect);
     populateEdgeSelectOptions(hEdgeSelect);
+    syncStoredEdgeNames();
     updateEdgeSelectState();
   };
   row._edgeSelects = { width: wEdgeSelect, height: hEdgeSelect };
@@ -4454,6 +4483,7 @@ function renderSheetOverview() {
 
       const widthEdgeSelect = rowEl?._edgeSelects?.width || rowEl?.querySelector('select[data-role="width-edge"]');
       const heightEdgeSelect = rowEl?._edgeSelects?.height || rowEl?.querySelector('select[data-role="height-edge"]');
+      const storedEdgeNames = rowEl?._edgeNames || null;
       const labelForEdgeSelect = (selectEl) => {
         if (!selectEl) return '';
         const directValue = (selectEl.value || '').trim();
@@ -4470,8 +4500,8 @@ function renderSheetOverview() {
         return (base || raw).trim();
       };
 
-      let horizontalEdgeName = labelForEdgeSelect(widthEdgeSelect);
-      let verticalEdgeName = labelForEdgeSelect(heightEdgeSelect);
+      let horizontalEdgeName = labelForEdgeSelect(widthEdgeSelect) || storedEdgeNames?.horizontal || '';
+      let verticalEdgeName = labelForEdgeSelect(heightEdgeSelect) || storedEdgeNames?.vertical || '';
 
       if (pieceMeta && baseRot !== finalRot) {
         const swap = horizontalEdgeName;

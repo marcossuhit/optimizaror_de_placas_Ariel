@@ -6,78 +6,129 @@
     <title>Login · Optimizador de Placas</title>
     <link rel="stylesheet" href="style.css" />
     <style>
-      .email-input-group {
+      .login-form-fields {
         display: grid;
-        grid-template-columns: 1fr auto 1.2fr;
-        gap: 0;
+        gap: 14px;
+      }
+      .input-field {
+        display: flex;
         align-items: center;
-        border: 1px solid #1d2a46;
-        background: rgba(16, 24, 40, 0.6);
-        border-radius: 10px;
+        border-radius: 12px;
         overflow: hidden;
+        background: #111827;
+        border: 1px solid rgba(107, 114, 128, 0.45);
+        box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
       }
-      .email-input-group input {
+      .input-icon {
+        padding: 0 16px;
+        color: rgba(251, 191, 36, 0.85);
+        display: grid;
+        place-items: center;
+        font-size: 1.1rem;
+      }
+      .input-field input,
+      .input-field select {
         border: none;
-        padding: 12px 14px;
         background: transparent;
-        color: #e2e8f0;
+        padding: 14px 16px;
         font-size: 1rem;
+        color: #f8fafc;
       }
-      .email-input-group input::placeholder { color: #64748b; }
-      .email-input-group span {
+      .input-field input { flex: 1 1 auto; min-width: 0; }
+      .input-field select {
+        width: 134px;
+        flex: 0 0 auto;
+      }
+      .input-field input::placeholder { color: rgba(226, 232, 240, 0.55); }
+      .input-field span.separator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
         padding: 0 10px;
-        color: #94a3b8;
-        font-weight: 600;
-        background: #141c2d;
+        min-height: 100%;
+        color: rgba(226, 232, 240, 0.78);
+        font-weight: 700;
+        letter-spacing: .02em;
       }
-      .email-input-group select {
-        border: none;
-        height: 100%;
-        padding: 12px 14px;
-        font-size: 1rem;
-        background: #0f172a;
-        color: #e2e8f0;
+      .input-field select {
         cursor: pointer;
+        font-weight: 600;
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+        color: #fbbf24;
       }
-      .login-actions form { width: 100%; display: flex; flex-direction: column; gap: 18px; }
-      .login-actions label { display: flex; flex-direction: column; gap: 8px; font-weight: 600; color: #cbd5f5; }
-      .login-actions small { color: #94a3b8; font-size: .82rem; }
+      .login-actions form {
+        display: grid;
+        gap: 24px;
+        width: 100%;
+      }
+      .login-actions label {
+        display: grid;
+        gap: 10px;
+        font-weight: 600;
+        color: rgba(226, 232, 240, 0.8);
+        font-size: .82rem;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+      .login-actions small {
+        color: rgba(226, 232, 240, 0.6);
+        font-size: .78rem;
+        line-height: 1.5;
+        text-align: center;
+      }
     </style>
   </head>
   <body class="login-page">
     <main class="login-wrapper">
-      <header class="login-header">
-        <h1>Optimizador de Placas</h1>
-        <p>Ingresá con tu correo para administrar cortes, stock y optimizar tus placas.</p>
-      </header>
-      <section class="login-actions">
-        <form id="manualLoginForm" autocomplete="off">
-          <label for="loginUserInput">
-            Correo electrónico
-            <div class="email-input-group">
-              <input id="loginUserInput" type="text" placeholder="nombre.apellido" aria-label="Nombre de usuario" required />
-              <span>@</span>
-              <select id="loginDomainSelect" aria-label="Dominio" required>
-                <option value="gmail.com">gmail.com</option>
-                <option value="hotmail.com">hotmail.com</option>
-                <option value="yahoo.com">yahoo.com</option>
-                <option value="outlook.com">outlook.com</option>
-                <option value="empresa.com">empresa.com</option>
-              </select>
+      <div class="login-stage">
+        <div class="login-card">
+          <div class="login-card__hero">
+            <h2>Panel de Corte</h2>
+          </div>
+          <div class="login-card__avatar" aria-hidden="true">
+            <div class="avatar-circle">
+              <span class="avatar-icon">⚙️</span>
             </div>
-          </label>
-          <small>El acceso no requiere contraseña. Usaremos este correo para identificarte y como remitente de los cortes enviados.</small>
-          <button type="submit" class="btn primary login-btn">Ingresar</button>
-        </form>
-      </section>
-      <footer class="login-footer">
-        <p>¿Necesitás usar Google OAuth? Probá con <a href="login2.html">la versión anterior del login</a>.</p>
-      </footer>
-      <footer>
-        <p>
-          <a href="https://www.placasfernando.com.ar/privacy.html">Política de Privacidad</a>
-        </p>
-      </footer>
+          </div>
+          <section class="login-card__panel">
+            <header class="login-header">
+              <h1>Taller Automatizado</h1>
+              <p>Programá tus cortes de melamina y MDF con precisión industrial.</p>
+            </header>
+            <section class="login-actions">
+              <form id="manualLoginForm" autocomplete="off">
+                <label for="loginUserInput">
+                  Correo electrónico
+                  <div class="login-form-fields">
+                    <div class="input-field">
+                      <span class="input-icon" aria-hidden="true">👤</span>
+                      <input id="loginUserInput" type="text" placeholder="tuemail" aria-label="Nombre de usuario" required />
+                      <span class="separator">@</span>
+                      <select id="loginDomainSelect" aria-label="Dominio" required>
+                        <option value="gmail.com">gmail.com</option>
+                        <option value="hotmail.com">hotmail.com</option>
+                        <option value="yahoo.com">yahoo.com</option>
+                        <option value="outlook.com">outlook.com</option>
+                        <option value="empresa.com">empresa.com</option>
+                      </select>
+                    </div>
+                  </div>
+                </label>
+                <small>Acceso sin contraseña. Usaremos este correo para identificarte y como remitente de los cortes enviados.</small>
+                <button type="submit" class="btn primary login-btn">Ingresar</button>
+              </form>
+            </section>
+            <footer class="login-footer">
+              <p>¿Preferís el ingreso con Google?<br /><a href="login2.html">Accedé con Google de forma clásica</a>.</p>
+            </footer>
+            <footer class="login-policy">
+              <p>
+                <a href="https://www.placasfernando.com.ar/privacy.html">Política de Privacidad</a>
+              </p>
+            </footer>
+          </section>
+        </div>
+      </div>
     </main>
 
     <script src="email-provider-config.js"></script>
