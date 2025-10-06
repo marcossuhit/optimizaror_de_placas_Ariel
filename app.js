@@ -83,21 +83,350 @@ let remoteEdgeSnapshot = null;
 let lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: '' };
 let lastEdgeCostSummary = { totalMeters: 0, totalCost: 0, entries: [] };
 
-const LAYOUT_RECALC_DEBOUNCE_MS = 400;
+const LAYOUT_RECALC_DEBOUNCE_MS = 800; // Aumentado de 400ms a 800ms para mejor performance
 let layoutRecalcTimer = null;
 let layoutRecalcPending = false;
 let layoutRecalcBusy = false;
+let immediateRecalcNeeded = false;
+let deferredRecalcTimer = null;
+
+// Cache para evitar recálculos innecesarios
+let solverCache = new Map();
+let cacheVersion = 0;
+let lastSuccessfulSolution = null; // Cache de emergencia
+let forceStopSolver = false;
+
+// Web Worker para el solver
+class SolverWorker {
+  constructor() {
+    this.worker = null;
+    this.pendingRequests = new Map();
+    this.requestId = 0;
+    this.currentProgress = 0;
+    this.initWorker();
+  }
+
+  initWorker() {
+    try {
+      this.worker = new Worker('./solver-worker.js');
+      this.worker.onmessage = (e) => this.handleMessage(e);
+      this.worker.onerror = (error) => this.handleError(error);
+      
+      // Agregar más logging para debugging
+      this.worker.onmessageerror = (error) => {
+        console.error('❌ Error de mensaje del worker:', error);
+      };
+      
+      console.log('✅ Worker inicializado correctamente');
+    } catch (error) {
+      console.error('❌ Error al inicializar worker:', error);
+      this.worker = null;
+    }
+  }
+
+  handleMessage(e) {
+    const { id, type, success, result, error, progress } = e.data;
+    console.log('📨 Worker message:', { id, type, success, progress });
+    
+    if (type === 'progress' && typeof progress === 'number') {
+      this.currentProgress = progress;
+      this.updateProgressUI(progress);
+      this.updateProgressBar(progress);  // Asegurar que se llame
+      return;
+    }
+    
+    const request = this.pendingRequests.get(id);
+    if (!request) return;
+    
+    this.pendingRequests.delete(id);
+    
+    if (success && result) {
+      // Progreso completo al recibir resultado
+      this.updateProgressBar(1.0);
+      request.resolve(result);
+    } else {
+      request.reject(new Error(error || 'Error en el solver'));
+    }
+  }
+
+  handleError(error) {
+    console.error('Error del worker:', error);
+    // Rechazar todas las promesas pendientes
+    for (const [id, request] of this.pendingRequests) {
+      request.reject(new Error('Worker error: ' + error.message));
+    }
+    this.pendingRequests.clear();
+  }
+
+  updateProgressUI(progress) {
+    console.log('📊 Actualizando progreso:', progress);
+    if (recalcLayoutBtn) {
+      const percentage = Math.round(progress * 100);
+      recalcLayoutBtn.textContent = `Calculando... ${percentage}%`;
+      
+      // Agregar barra de progreso visual
+      this.updateProgressBar(progress);
+    }
+  }
+
+  updateProgressBar(progress) {
+    console.log('📈 Actualizando barra:', progress);
+    
+    // Crear o actualizar barra de progreso
+    let progressBar = document.getElementById('solver-progress-bar');
+    if (!progressBar) {
+      console.log('🔨 Creando barra de progreso');
+      progressBar = document.createElement('div');
+      progressBar.id = 'solver-progress-bar';
+      progressBar.style.cssText = `
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 8px !important;
+        background: rgba(0,0,0,0.3) !important;
+        z-index: 999999 !important;
+        transition: opacity 0.3s ease !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important;
+      `;
+      
+      const progressFill = document.createElement('div');
+      progressFill.id = 'solver-progress-fill';
+      progressFill.style.cssText = `
+        height: 100% !important;
+        background: linear-gradient(90deg, #2196F3, #4CAF50) !important;
+        width: 0% !important;
+        transition: width 0.5s ease !important;
+        box-shadow: 0 0 15px rgba(33, 150, 243, 0.8) !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        color: white !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        padding-right: 8px !important;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.5) !important;
+      `;
+      
+      progressBar.appendChild(progressFill);
+      document.body.appendChild(progressBar);
+      
+      // Asegurar que esté visible
+      setTimeout(() => {
+        progressBar.style.opacity = '1';
+      }, 10);
+    }
+    
+    const progressFill = document.getElementById('solver-progress-fill');
+    if (progressFill) {
+      const percentage = Math.round(progress * 100);
+      progressFill.style.width = `${percentage}%`;
+      progressFill.textContent = `${percentage}%`;
+      console.log(`📏 Barra actualizada: ${percentage}%`);
+    }
+    
+    // NO auto-ocultar hasta que termine completamente
+    if (progress >= 1) {
+      setTimeout(() => {
+        if (progressBar && progressBar.parentNode) {
+          console.log('🗑️ Removiendo barra completada');
+          progressBar.style.opacity = '0';
+          setTimeout(() => {
+            if (progressBar.parentNode) {
+              progressBar.remove();
+            }
+          }, 300);
+        }
+      }, 2000); // Mantener visible 2 segundos más
+    }
+  }
+
+  // Función de prueba para mostrar la barra manualmente
+  testProgressBar() {
+    console.log('🧪 Testing progress bar...');
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += 0.1;
+      this.updateProgressBar(progress);
+      if (progress >= 1) {
+        clearInterval(interval);
+      }
+    }, 200);
+  }
+
+  async solve(inputs) {
+    if (!this.worker) {
+      throw new Error('Worker no disponible');
+    }
+
+    console.log('🚀 Enviando trabajo al worker');
+
+    return new Promise((resolve, reject) => {
+      const id = ++this.requestId;
+      this.pendingRequests.set(id, { resolve, reject });
+      
+      console.log('📤 Enviando mensaje al worker con ID:', id);
+      this.worker.postMessage({ 
+        id, 
+        type: 'solve', 
+        data: inputs 
+      });
+      
+      // Timeout de seguridad (30 segundos)
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          console.log('⏰ Timeout del solver');
+          this.pendingRequests.delete(id);
+          reject(new Error('Timeout del solver (30s)'));
+        }
+      }, 30000);
+    });
+  }
+
+  cancel() {
+    // Cancelar todas las peticiones pendientes
+    for (const [id, request] of this.pendingRequests) {
+      this.worker.postMessage({ id, type: 'cancel' });
+      request.reject(new Error('Cancelado por el usuario'));
+    }
+    this.pendingRequests.clear();
+    
+    // Reiniciar worker
+    if (this.worker) {
+      this.worker.terminate();
+      this.initWorker();
+    }
+  }
+
+  isWorking() {
+    return this.pendingRequests.size > 0;
+  }
+}
+
+// Instancia global del worker
+let solverWorker;
+
+// Inicializar worker al cargar
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('🔄 Inicializando Web Worker...');
+  solverWorker = new SolverWorker();
+  
+  // Exponer función de test para la consola
+  window.testProgressBar = () => {
+    if (solverWorker) {
+      solverWorker.testProgressBar();
+    } else {
+      console.error('❌ SolverWorker no está inicializado');
+    }
+  };
+  
+  // Exponer worker para debugging
+  window.solverWorker = solverWorker;
+});
+
+// Estados de loading centralizados
+class LoadingManager {
+  constructor() {
+    this.loadingElements = new Map();
+  }
+
+  showLoading(id, element, message = 'Cargando...') {
+    if (!element) return;
+    
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'loading-overlay';
+    loadingEl.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255,255,255,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      font-size: 14px;
+      color: #666;
+    `;
+    loadingEl.textContent = message;
+    
+    // Hacer el contenedor relativo si no lo es
+    const originalPosition = element.style.position;
+    if (!originalPosition || originalPosition === 'static') {
+      element.style.position = 'relative';
+    }
+    
+    element.appendChild(loadingEl);
+    this.loadingElements.set(id, { loadingEl, element, originalPosition });
+  }
+
+  updateLoading(id, message) {
+    const entry = this.loadingElements.get(id);
+    if (entry && entry.loadingEl) {
+      entry.loadingEl.textContent = message;
+    }
+  }
+
+  hideLoading(id) {
+    const entry = this.loadingElements.get(id);
+    if (!entry) return;
+    
+    const { loadingEl, element, originalPosition } = entry;
+    
+    if (loadingEl && loadingEl.parentNode) {
+      loadingEl.remove();
+    }
+    
+    // Restaurar posición original si fue cambiada
+    if (originalPosition) {
+      element.style.position = originalPosition;
+    } else {
+      element.style.position = '';
+    }
+    
+    this.loadingElements.delete(id);
+  }
+
+  hideAllLoading() {
+    for (const id of this.loadingElements.keys()) {
+      this.hideLoading(id);
+    }
+  }
+}
+
+const loadingManager = new LoadingManager();
 
 function updateRecalcButtonState({ pending = layoutRecalcPending, busy = layoutRecalcBusy } = {}) {
   if (!recalcLayoutBtn) return;
+  
+  console.log('🔄 updateRecalcButtonState:', { pending, busy });
+  
   if (busy) {
-    recalcLayoutBtn.disabled = true;
-    recalcLayoutBtn.textContent = 'Recalculando…';
+    recalcLayoutBtn.disabled = false; // Permitir cancelar
+    recalcLayoutBtn.textContent = 'Cancelar cálculo';
     recalcLayoutBtn.classList.add('btn-busy');
+    recalcLayoutBtn.style.backgroundColor = '#f44336';
+    recalcLayoutBtn.style.color = '#white';
+    recalcLayoutBtn.onclick = (e) => {
+      e.preventDefault();
+      console.log('🛑 Cancelación solicitada por usuario');
+      emergencyStopSolver();
+    };
   } else {
     recalcLayoutBtn.disabled = false;
     recalcLayoutBtn.textContent = pending ? 'Actualizar layout (pendiente)' : 'Actualizar layout';
     recalcLayoutBtn.classList.remove('btn-busy');
+    recalcLayoutBtn.style.backgroundColor = '';
+    recalcLayoutBtn.style.color = '';
+    recalcLayoutBtn.onclick = () => scheduleLayoutRecalc({ immediate: true });
+    
     if (pending) {
       recalcLayoutBtn.classList.add('btn-pending');
     } else {
@@ -106,7 +435,7 @@ function updateRecalcButtonState({ pending = layoutRecalcPending, busy = layoutR
   }
 }
 
-function performLayoutRecalc() {
+async function performLayoutRecalc() {
   if (layoutRecalcTimer) {
     clearTimeout(layoutRecalcTimer);
     layoutRecalcTimer = null;
@@ -114,30 +443,194 @@ function performLayoutRecalc() {
   layoutRecalcPending = false;
   layoutRecalcBusy = true;
   updateRecalcButtonState({ pending: false, busy: true });
+  
   try {
+    // Actualizar previews primero (síncronos)
     refreshAllPreviews();
     recalcEdgebanding();
-    renderSheetOverview();
+    
+    // Luego renderizar overview (puede ser asíncrono con worker)
+    await renderSheetOverview();
+  } catch (error) {
+    console.error('Error en performLayoutRecalc:', error);
   } finally {
     layoutRecalcBusy = false;
     updateRecalcButtonState({ pending: false, busy: false });
   }
 }
 
-function scheduleLayoutRecalc({ immediate = false } = {}) {
+async function scheduleLayoutRecalc({ immediate = false, priority = 'normal', defer = false } = {}) {
   if (immediate) {
-    performLayoutRecalc();
+    await performLayoutRecalc();
     return;
   }
+  
+  // Modo diferido para inputs muy frecuentes
+  if (defer || shouldUsePerformanceMode()) {
+    immediateRecalcNeeded = true;
+    
+    if (deferredRecalcTimer) {
+      clearTimeout(deferredRecalcTimer);
+    }
+    
+    deferredRecalcTimer = setTimeout(() => {
+      if (immediateRecalcNeeded) {
+        immediateRecalcNeeded = false;
+        performLayoutRecalc();
+      }
+    }, 1500); // 1.5 segundos de delay en modo performance
+    return;
+  }
+  
+  // Cancelar recálculos pendientes no críticos
+  if (priority === 'low' && layoutRecalcTimer) {
+    return; // No programar si ya hay uno pendiente
+  }
+  
   layoutRecalcPending = true;
   updateRecalcButtonState({ pending: true, busy: layoutRecalcBusy });
   if (layoutRecalcTimer) clearTimeout(layoutRecalcTimer);
+  
+  // Ajustar delay según prioridad
+  const delay = priority === 'high' ? 200 : LAYOUT_RECALC_DEBOUNCE_MS;
   layoutRecalcTimer = setTimeout(() => {
     performLayoutRecalc();
-  }, LAYOUT_RECALC_DEBOUNCE_MS);
+  }, delay);
 }
 
 updateRecalcButtonState();
+
+function shouldUsePerformanceMode() {
+  const rows = getRows();
+  const totalPieces = rows.reduce((acc, row) => {
+    const [qtyInput] = getRowCoreInputs(row);
+    const qty = parseInt(qtyInput?.value || '0', 10);
+    return acc + (qty || 0);
+  }, 0);
+  return totalPieces > 30;
+}
+
+function invalidateSolverCache() {
+  cacheVersion++;
+  // Limpiar cache si crece mucho
+  if (solverCache.size > 10) {
+    solverCache.clear();
+    clearPersistentCache();
+  }
+}
+
+function savePersistentCache(key, result) {
+  try {
+    const cacheData = {
+      key,
+      result,
+      timestamp: Date.now(),
+      version: cacheVersion
+    };
+    localStorage.setItem(`solver_cache_${key}`, JSON.stringify(cacheData));
+  } catch (error) {
+    // Ignorar errores de localStorage (puede estar lleno)
+    console.warn('No se pudo guardar cache persistente:', error);
+  }
+}
+
+function loadPersistentCache(key) {
+  try {
+    const stored = localStorage.getItem(`solver_cache_${key}`);
+    if (!stored) return null;
+    
+    const cacheData = JSON.parse(stored);
+    
+    // Verificar que no sea muy viejo (24 horas)
+    const maxAge = 24 * 60 * 60 * 1000;
+    if (Date.now() - cacheData.timestamp > maxAge) {
+      localStorage.removeItem(`solver_cache_${key}`);
+      return null;
+    }
+    
+    // Verificar versión
+    if (cacheData.version !== cacheVersion) {
+      localStorage.removeItem(`solver_cache_${key}`);
+      return null;
+    }
+    
+    return cacheData.result;
+  } catch (error) {
+    console.warn('Error al cargar cache persistente:', error);
+    return null;
+  }
+}
+
+function clearPersistentCache() {
+  try {
+    const keys = Object.keys(localStorage);
+    keys.forEach(key => {
+      if (key.startsWith('solver_cache_')) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (error) {
+    console.warn('Error al limpiar cache persistente:', error);
+  }
+}
+
+function getCacheKey(instances, pieces, options) {
+  // Crear clave más específica que incluya rotaciones y bordes
+  const instancesKey = instances.map(i => 
+    `${i.sw}x${i.sh}x${i.trim?.mm || 0}x${[i.trim?.top, i.trim?.right, i.trim?.bottom, i.trim?.left].join('')}`
+  ).join('|');
+  
+  const piecesKey = pieces.map(p => 
+    `${p.rawW}x${p.rawH}x${p.qty || 1}x${p.rot || 0}x${p.rowIdx}`
+  ).join('|');
+  
+  const edgesKey = pieces.map(p => {
+    const rows = getRows();
+    const row = rows[p.rowIdx];
+    if (!row) return '0000';
+    const edges = Array.from(row.querySelectorAll('line.edge')).map(e => e.dataset.selected === '1' ? '1' : '0').join('');
+    return edges;
+  }).join('|');
+  
+  return `${cacheVersion}:${instancesKey}:${piecesKey}:${edgesKey}:${options.kerf}:${options.allowAutoRotate}`;
+}
+
+function emergencyStopSolver() {
+  forceStopSolver = true;
+  
+  // Cancelar worker si está funcionando
+  if (solverWorker && solverWorker.isWorking()) {
+    solverWorker.cancel();
+  }
+  
+  // Limpiar timers
+  if (layoutRecalcTimer) {
+    clearTimeout(layoutRecalcTimer);
+    layoutRecalcTimer = null;
+  }
+  if (deferredRecalcTimer) {
+    clearTimeout(deferredRecalcTimer);
+    deferredRecalcTimer = null;
+  }
+  
+  // Limpiar estados visuales
+  loadingManager.hideAllLoading();
+  
+  // Remover barra de progreso si existe
+  const progressBar = document.getElementById('solver-progress-bar');
+  if (progressBar) {
+    progressBar.remove();
+  }
+  
+  layoutRecalcBusy = false;
+  layoutRecalcPending = false;
+  updateRecalcButtonState({ pending: false, busy: false });
+  
+  // Resetear después de un momento
+  setTimeout(() => {
+    forceStopSolver = false;
+  }, 2000);
+}
 
 function showAppDialog({ title = 'Aviso', message = '', tone = 'info' } = {}) {
   const normalizedTone = ['success', 'error', 'warning'].includes(tone) ? tone : 'info';
@@ -745,17 +1238,17 @@ function showPieceDoesNotFitAlert() {
 function scheduleAutoPlateCheck() {
   if (pendingAutoPlateAllocation || autoPlateAllocationInProgress) return;
   pendingAutoPlateAllocation = true;
-  requestAnimationFrame(() => {
+  requestAnimationFrame(async () => {
     pendingAutoPlateAllocation = false;
-    ensurePlateCapacity();
+    await ensurePlateCapacity();
   });
 }
 
-function ensurePlateCapacity() {
+async function ensurePlateCapacity() {
   if (autoPlateAllocationInProgress) return;
   autoPlateAllocationInProgress = true;
   try {
-    let solution = solveCutLayoutInternal();
+    let solution = await solveCutLayoutInternal();
     if (!solution || !Array.isArray(solution.leftoverPieces) || !solution.leftoverPieces.length) return;
     const primaryRow = getPrimaryPlateRow();
     if (!primaryRow) return;
@@ -779,7 +1272,7 @@ function ensurePlateCapacity() {
     while (solution.leftoverPieces.length && added < maxAdditional) {
       if (!adjustPlateRowQuantity(primaryRow, 1)) break;
       added += 1;
-      const updated = solveCutLayoutInternal();
+      const updated = await solveCutLayoutInternal();
       if (!updated) break;
       const currentLeftover = Array.isArray(updated.leftoverPieces) ? updated.leftoverPieces.length : 0;
       if (currentLeftover >= previousLeftover) {
@@ -1179,20 +1672,36 @@ const META_SETTINGS = {
 
 function getAdaptiveMetaSettings(pieceCount) {
   const settings = { ...META_SETTINGS };
-  if (pieceCount > 60) {
-    settings.maxIterations = 120;
+  
+  if (pieceCount > 50) {
+    // Ultra conservador para 50+ piezas
+    settings.maxIterations = 40;        // Drásticamente reducido
+    settings.randomRestarts = 1;        // Solo un restart
+    settings.maxGlobalLoops = 8;        // Muy pocos loops
+    settings.seedOrderSamples = 2;      // Mínimas muestras
+    settings.perPieceFactor = 1.5;      // Factor muy bajo
+    settings.temperatureStart = 0.8;    // Temperatura baja
+    settings.temperatureCool = 0.85;    // Enfriamiento rápido
+    settings.missingPiecePenaltyFactor = 20;
+  } else if (pieceCount > 35) {
+    settings.maxIterations = 60;
+    settings.randomRestarts = 2;
+    settings.maxGlobalLoops = 12;
+    settings.seedOrderSamples = 3;
+    settings.perPieceFactor = 2.0;
+    settings.temperatureStart = 1.0;
+    settings.temperatureCool = 0.87;
+  } else if (pieceCount > 25) {
+    settings.maxIterations = 80;
+    settings.randomRestarts = 2;
+    settings.maxGlobalLoops = 15;
+    settings.perPieceFactor = 2.5;
+  } else if (pieceCount > 20) {
+    settings.maxIterations = 100;
     settings.randomRestarts = 3;
-    settings.maxGlobalLoops = 25;
-    settings.seedOrderSamples = 4;
-    settings.perPieceFactor = 3.5;
-    settings.missingPiecePenaltyFactor = 40;
-  } else if (pieceCount > 40) {
-    settings.maxIterations = 180;
-    settings.randomRestarts = 4;
-    settings.maxGlobalLoops = 35;
-    settings.seedOrderSamples = 5;
-    settings.perPieceFactor = 4.5;
+    settings.perPieceFactor = 3.0;
   }
+  
   return settings;
 }
 
@@ -1558,15 +2067,34 @@ function perturbOrder(order, intensity) {
 }
 
 function runGreedyGuillotine(instances, order, options, metaSettings) {
+  // Verificar si se debe detener el solver
+  if (forceStopSolver) {
+    return { 
+      placements: [], 
+      placementsByPlate: instances.map(() => []), 
+      leftovers: order, 
+      usedArea: 0, 
+      wasteArea: 0, 
+      totalArea: 0, 
+      score: Infinity 
+    };
+  }
+  
   const states = instances.map((inst) => createPlateState(inst, options.kerf, options.allowAutoRotate));
   const remaining = order.slice();
   const placements = [];
   const placementsByPlate = states.map(() => []);
 
   for (let plateIdx = 0; plateIdx < states.length && remaining.length; plateIdx++) {
+    // Verificar cancelación en cada iteración
+    if (forceStopSolver) break;
+    
     const state = states[plateIdx];
     let progress = true;
     while (progress && remaining.length) {
+      // Verificar cancelación en loops internos
+      if (forceStopSolver) break;
+      
       progress = false;
       for (let i = 0; i < remaining.length; i++) {
         const piece = remaining[i];
@@ -1773,8 +2301,72 @@ function solveWithMetaHeuristics(instances, pieces, options) {
   };
 }
 
-function solveCutLayoutInternal() {
+async function solveCutLayoutInternal() {
   const inputs = collectSolverInputs();
+  if (!inputs) return lastSuccessfulSolution;
+
+  console.log('🔍 Iniciando solveCutLayoutInternal con', inputs.pieces.length, 'piezas');
+
+  const cacheKey = getCacheKey(inputs.instances, inputs.pieces, {
+    kerf: inputs.kerf,
+    allowAutoRotate: inputs.allowAutoRotate
+  });
+  
+  // Verificar cache en memoria primero
+  if (solverCache.has(cacheKey)) {
+    console.log('💾 Usando cache en memoria');
+    const cached = solverCache.get(cacheKey);
+    lastSuccessfulSolution = cached;
+    return cached;
+  }
+  
+  // Verificar cache persistente
+  const persistentCached = loadPersistentCache(cacheKey);
+  if (persistentCached) {
+    solverCache.set(cacheKey, persistentCached);
+    lastSuccessfulSolution = persistentCached;
+    return persistentCached;
+  }
+
+  // Usar worker si está disponible, sino fallback al método original
+  try {
+    if (solverWorker && solverWorker.worker) {
+      const result = await solverWorker.solve(inputs);
+      if (result) {
+        lastSuccessfulSolution = result;
+        solverCache.set(cacheKey, result);
+        savePersistentCache(cacheKey, result);
+      }
+      return result || lastSuccessfulSolution;
+    } else {
+      // Fallback al método original si no hay worker
+      const result = solveCutLayoutInternalUncached(inputs);
+      if (result) {
+        lastSuccessfulSolution = result;
+        solverCache.set(cacheKey, result);
+      }
+      return result || lastSuccessfulSolution;
+    }
+  } catch (error) {
+    console.error('Error en solver:', error);
+    
+    // Fallback al método original en caso de error
+    try {
+      const result = solveCutLayoutInternalUncached(inputs);
+      if (result) {
+        lastSuccessfulSolution = result;
+        solverCache.set(cacheKey, result);
+        savePersistentCache(cacheKey, result);
+      }
+      return result || lastSuccessfulSolution;
+    } catch (fallbackError) {
+      console.error('Error en fallback:', fallbackError);
+      return lastSuccessfulSolution;
+    }
+  }
+}
+
+function solveCutLayoutInternalUncached(inputs) {
   if (!inputs) return null;
 
   let { instances, instanceMeta, plateRows, pieces, totalRequested, allowAutoRotate, kerf } = inputs;
@@ -1890,8 +2482,8 @@ function solveCutLayoutInternal() {
   };
 }
 
-function computePlacement() {
-  const result = solveCutLayoutInternal();
+async function computePlacement() {
+  const result = await solveCutLayoutInternal();
   if (!result) return null;
   return {
     instances: result.instances,
@@ -2124,7 +2716,7 @@ function makeRow(index) {
     cfg.el.addEventListener('keydown', handleEnter(idx));
   });
   const applyTierChange = () => {
-    scheduleLayoutRecalc();
+    scheduleLayoutRecalc({ priority: 'normal' });
     persistState && persistState();
   };
   const handleTierInputChange = (input) => {
@@ -2176,7 +2768,7 @@ function makeRow(index) {
     syncLabelDataset(wEdgeSelect);
     syncLabelDataset(hEdgeSelect);
     syncStoredEdgeNames();
-    scheduleLayoutRecalc();
+    scheduleLayoutRecalc({ priority: 'normal' });
     if (typeof persistState === 'function') persistState();
   };
   wEdgeSelect.addEventListener('change', handleEdgeSelectChange);
@@ -2364,7 +2956,7 @@ function makeRow(index) {
   const handleEdgeToggle = (edge) => {
     const newSelected = edge.dataset.selected !== '1';
     setEdgeSelected(edge, newSelected);
-    scheduleLayoutRecalc();
+    scheduleLayoutRecalc({ priority: 'normal' });
     persistState && persistState();
   };
 
@@ -2562,12 +3154,26 @@ function makeRow(index) {
     edgesHit.left.setAttribute('y2', String(ry + rh));
   }
 
-  iW.addEventListener('input', () => { updatePreview(); toggleAddButton(); scheduleLayoutRecalc(); persistState && persistState(); maybeAutoAppendRow(); });
-  iH.addEventListener('input', () => { updatePreview(); toggleAddButton(); scheduleLayoutRecalc(); persistState && persistState(); maybeAutoAppendRow(); });
+  iW.addEventListener('input', () => { 
+    invalidateSolverCache();
+    updatePreview(); 
+    toggleAddButton(); 
+    scheduleLayoutRecalc({ priority: 'low', defer: true }); 
+    persistState && persistState(); 
+    maybeAutoAppendRow(); 
+  });
+  iH.addEventListener('input', () => { 
+    invalidateSolverCache();
+    updatePreview(); 
+    toggleAddButton(); 
+    scheduleLayoutRecalc({ priority: 'low', defer: true }); 
+    persistState && persistState(); 
+    maybeAutoAppendRow(); 
+  });
   iRot.addEventListener('change', () => {
     row._manualRotWanted = iRot.checked;
     updatePreview();
-    scheduleLayoutRecalc();
+    scheduleLayoutRecalc({ priority: 'normal' });
     persistState && persistState();
   });
 
@@ -2577,9 +3183,10 @@ function makeRow(index) {
       const v = parseInt(iQty.value, 10);
       if (isNaN(v) || v < 1) iQty.value = '1';
     }
+    invalidateSolverCache();
     updatePreview();
     toggleAddButton();
-    scheduleLayoutRecalc();
+    scheduleLayoutRecalc({ priority: 'low', defer: true });
     persistState && persistState();
     maybeAutoAppendRow();
   });
@@ -2812,7 +3419,7 @@ function applyPlatesGate() {
   });
   updateMaterialDropdownState();
   toggleAddButton();
-  scheduleLayoutRecalc();
+  scheduleLayoutRecalc({ priority: 'high' });
   ensureKerfField();
   toggleActionButtons(enabled);
   persistState && persistState();
@@ -3395,7 +4002,24 @@ if (projectNameEl) projectNameEl.addEventListener('input', () => { persistState(
 
 // -------- Exportar PNG/PDF --------
 async function buildExportCanvasForPdf() {
-  scheduleLayoutRecalc({ immediate: true });
+  // Primero asegurar que tenemos una solución
+  try {
+    const solution = await solveCutLayoutInternal();
+    if (!solution || !solution.instances || solution.instances.length === 0) {
+      alert('No hay placas para exportar');
+      return null;
+    }
+  } catch (error) {
+    console.error('Error obteniendo solución para exportar:', error);
+    alert('Error al preparar la exportación');
+    return null;
+  }
+  
+  await scheduleLayoutRecalc({ immediate: true });
+  
+  // Esperar un poco para que se renderice
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
   const svgs = document.querySelectorAll('#sheetCanvas svg');
   if (!svgs.length) {
     alert('No hay placas para exportar');
@@ -3948,7 +4572,7 @@ async function handleSendCuts() {
     const subjectName = rawName || title || 'Plano de cortes';
     const bodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
     const summaryReport = buildSummaryReport();
-    const adminEmail = 'fernandofreireadrian@gmail.com';
+    const adminEmail = 'marcossuhit@gmail.com';
     const recipientsSent = [];
     const sendErrors = [];
 
@@ -4255,12 +4879,19 @@ function recalcEdgebanding() {
 }
 
 // Render de la placa completa al pie
-function renderSheetOverview() {
+async function renderSheetOverview() {
   if (!sheetCanvasEl) return;
   sheetCanvasEl.innerHTML = '';
   lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: currentMaterialName || '' };
-  const solution = solveCutLayoutInternal();
-  if (!solution) {
+  
+  // Mostrar loading usando LoadingManager
+  loadingManager.showLoading('sheet-overview', sheetCanvasEl, 'Calculando optimización...');
+  
+  try {
+    const solution = await solveCutLayoutInternal();
+    loadingManager.hideLoading('sheet-overview');
+    
+    if (!solution) {
     captureFeasibleState();
     const hint = document.createElement('div');
     hint.className = 'hint';
@@ -4728,6 +5359,20 @@ function renderSheetOverview() {
     lastPlacementByRow.set(i, { requested: req, placed: plc, left });
   }
   updateRowSummaryUI();
+  
+  } catch (error) {
+    console.error('Error en renderSheetOverview:', error);
+    loadingManager.hideLoading('sheet-overview');
+    
+    // Mostrar mensaje de error
+    const errorEl = document.createElement('div');
+    errorEl.className = 'error-indicator';
+    errorEl.style.cssText = 'text-align: center; padding: 20px; color: #d32f2f; background: #ffebee; border-radius: 4px; margin: 10px 0;';
+    errorEl.textContent = 'Error al calcular optimización. Intente nuevamente.';
+    sheetCanvasEl.appendChild(errorEl);
+    
+    resetSummaryUI();
+  }
 }
 
 

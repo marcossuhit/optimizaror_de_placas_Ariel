@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Web Worker</title>
+</head>
+<body>
+    <button id="testWorkerBtn">🧪 Probar Web Worker</button>
+    <div id="testOutput"></div>
+    
+    <script>
+        // Función de prueba simple
+        window.testWebWorker = function() {
+            const output = document.getElementById('testOutput');
+            output.innerHTML = '🔄 Probando Web Worker...';
+            
+            if (window.solverWorker && window.solverWorker.worker) {
+                output.innerHTML += '<br>✅ Worker disponible';
+                
+                // Enviar mensaje de prueba
+                const testData = {
+                    instances: [{sw: 1000, sh: 1000}],
+                    pieces: [{rawW: 100, rawH: 100, id: 1}],
+                    allowAutoRotate: true,
+                    kerf: 5
+                };
+                
+                window.solverWorker.solve(testData)
+                    .then(result => {
+                        output.innerHTML += '<br>✅ Worker funcionando correctamente';
+                        console.log('Test result:', result);
+                    })
+                    .catch(error => {
+                        output.innerHTML += '<br>❌ Error en worker: ' + error.message;
+                        console.error('Test error:', error);
+                    });
+            } else {
+                output.innerHTML += '<br>❌ Worker no disponible';
+            }
+        };
+        
+        document.getElementById('testWorkerBtn').onclick = window.testWebWorker;
+    </script>
+</body>
+</html>
