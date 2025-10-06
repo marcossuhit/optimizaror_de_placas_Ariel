@@ -2312,10 +2312,14 @@ async function solveCutLayoutInternal() {
     allowAutoRotate: inputs.allowAutoRotate
   });
   
-  // Verificar cache en memoria primero
+  // Verificar cache en memoria primero (incluye soluciones guardadas del JSON)
   if (solverCache.has(cacheKey)) {
-    console.log('💾 Usando cache en memoria');
     const cached = solverCache.get(cacheKey);
+    if (cached.timestamp) {
+      console.log('💾 Usando solución guardada del JSON');
+    } else {
+      console.log('💾 Usando cache en memoria');
+    }
     lastSuccessfulSolution = cached;
     return cached;
   }
@@ -2323,6 +2327,7 @@ async function solveCutLayoutInternal() {
   // Verificar cache persistente
   const persistentCached = loadPersistentCache(cacheKey);
   if (persistentCached) {
+    console.log('💾 Usando cache persistente (puede ser de solución guardada anterior)');
     solverCache.set(cacheKey, persistentCached);
     lastSuccessfulSolution = persistentCached;
     return persistentCached;
@@ -3519,7 +3524,23 @@ function serializeState() {
   const kerfMm = parseInt(kerfInput?.value ?? pendingKerfValue ?? '0', 10) || 0;
   const autoRotate = !!(autoRotateToggle && autoRotateToggle.checked);
   const material = currentMaterialName || '';
-  return { name, plates, rows, kerfMm, autoRotate, material };
+  
+  // ✅ NUEVO: Incluir la solución calculada
+  const currentSolution = lastSuccessfulSolution;
+  const savedSolution = currentSolution ? {
+    instances: currentSolution.instances,
+    placements: currentSolution.placements,
+    placementsByPlate: currentSolution.placementsByPlate,
+    leftoverGroups: currentSolution.leftoverGroups,
+    leftoverPieces: currentSolution.leftoverPieces,
+    totalRequested: currentSolution.totalRequested,
+    usedArea: currentSolution.usedArea,
+    wasteArea: currentSolution.wasteArea,
+    totalArea: currentSolution.totalArea,
+    timestamp: Date.now() // Para validar que no sea muy vieja
+  } : null;
+  
+  return { name, plates, rows, kerfMm, autoRotate, material, savedSolution };
 }
 
 function persistState() {
@@ -3546,6 +3567,14 @@ function triggerBlobDownload(filename, blob) {
 
 function saveJSON() {
   const state = serializeState();
+  
+  // Log informativo sobre si se guardó la planificación
+  if (state.savedSolution) {
+    console.log('💾 Guardando JSON con planificación calculada - al cargar mantendrá el mismo diseño');
+  } else {
+    console.log('💾 Guardando JSON sin planificación - al cargar recalculará automáticamente');
+  }
+  
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const name = (projectNameEl?.value || '').trim();
@@ -3946,7 +3975,296 @@ function loadState(state) {
 
   ensureKerfField();
   applyPlatesGate();
+  
+  // ✅ NUEVO: Restaurar solución guardada DESPUÉS de aplicar placas
+  console.log('🔍 DEBUG: Verificando solución guardada después de applyPlatesGate...');
+  
+  if (state.savedSolution && isValidSavedSolutionWithCurrentPlates(state.savedSolution)) {
+    console.log('🔄 Usando solución guardada del JSON');
+    lastSuccessfulSolution = state.savedSolution;
+    
+    // Marcar que tenemos una solución precalculada
+    const currentPlates = getPlates(); // Usar placas actuales
+    const inputs = {
+      instances: currentPlates.map(p => ({
+        sw: p.sw,
+        sh: p.sh,
+        trim: p.trim || { mm: 0, top: false, right: false, bottom: false, left: false }
+      })),
+      pieces: collectPiecesFromState(state),
+      kerf: state.kerfMm || 0,
+      allowAutoRotate: state.autoRotate !== false
+    };
+    
+    console.log('🔍 DEBUG: Usando placas actuales para cache key:', {
+      currentPlatesCount: currentPlates.length,
+      piecesCount: inputs.pieces?.length,
+      kerf: inputs.kerf,
+      autoRotate: inputs.allowAutoRotate
+    });
+    
+    const cacheKey = getCacheKey(inputs.instances, inputs.pieces, {
+      kerf: inputs.kerf,
+      allowAutoRotate: inputs.allowAutoRotate
+    });
+    
+    console.log('🔍 DEBUG: Cache key generado:', cacheKey);
+    
+    solverCache.set(cacheKey, state.savedSolution);
+    
+    console.log('🔍 DEBUG: Solución añadida al cache, tamaño del cache:', solverCache.size);
+    
+    // Renderizar inmediatamente la solución guardada
+    setTimeout(() => {
+      console.log('🔍 DEBUG: Iniciando renderizado de solución guardada...');
+      renderSheetOverview();
+    }, 100);
+  } else if (state.savedSolution) {
+    console.log('❌ Solución guardada no es válida con placas actuales, recalculando...');
+  } else {
+    console.log('ℹ️ No hay solución guardada en el JSON');
+  }
+  
   persistState();
+}
+
+// ✅ NUEVAS FUNCIONES AUXILIARES PARA SOLUCIONES GUARDADAS
+
+// Validar que la solución guardada sea compatible con el estado actual
+function isValidSavedSolution(savedSolution, state) {
+  console.log('🔍 DEBUG: Validando solución guardada...', {
+    savedSolution: !!savedSolution,
+    savedSolutionType: typeof savedSolution,
+    state: !!state
+  });
+  
+  if (!savedSolution || typeof savedSolution !== 'object') {
+    console.log('❌ DEBUG: Solución no es un objeto válido');
+    return false;
+  }
+  
+  // Verificar que no sea muy vieja (opcional, ej: máximo 30 días)
+  const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 días
+  if (savedSolution.timestamp && Date.now() - savedSolution.timestamp > maxAge) {
+    console.log('❌ DEBUG: Solución muy antigua:', {
+      timestamp: savedSolution.timestamp,
+      age: Date.now() - savedSolution.timestamp,
+      maxAge
+    });
+    return false;
+  }
+  
+  // Verificar que tenga la estructura correcta
+  const required = ['instances', 'placements', 'placementsByPlate'];
+  const hasRequired = required.every(prop => Array.isArray(savedSolution[prop]));
+  console.log('🔍 DEBUG: Verificando estructura requerida:', {
+    required,
+    hasAll: hasRequired,
+    structure: required.map(prop => ({
+      prop,
+      exists: prop in savedSolution,
+      isArray: Array.isArray(savedSolution[prop]),
+      length: savedSolution[prop]?.length
+    }))
+  });
+  
+  if (!hasRequired) {
+    console.log('❌ DEBUG: Estructura requerida faltante');
+    return false;
+  }
+  
+  // Verificar que la cantidad de placas coincida
+  const currentPlates = state.plates?.length || 0;
+  const savedPlates = savedSolution.instances?.length || 0;
+  console.log('🔍 DEBUG: Comparando placas:', {
+    currentPlates,
+    savedPlates,
+    match: currentPlates === savedPlates
+  });
+  
+  if (currentPlates !== savedPlates) {
+    console.log('❌ DEBUG: Cantidad de placas no coincide');
+    return false;
+  }
+  
+  // Verificar que las dimensiones de placas coincidan
+  for (let i = 0; i < currentPlates; i++) {
+    const current = state.plates[i];
+    const saved = savedSolution.instances[i];
+    
+    console.log(`🔍 DEBUG: Placa ${i}:`, {
+      current: current ? { sw: current.sw, sh: current.sh } : null,
+      saved: saved ? { sw: saved.sw, sh: saved.sh } : null
+    });
+    
+    if (!current || !saved) {
+      console.log(`❌ DEBUG: Placa ${i} faltante`);
+      return false;
+    }
+    
+    const swDiff = Math.abs(current.sw - saved.sw);
+    const shDiff = Math.abs(current.sh - saved.sh);
+    
+    if (swDiff > 0.1 || shDiff > 0.1) {
+      console.log(`❌ DEBUG: Dimensiones de placa ${i} no coinciden:`, {
+        swDiff,
+        shDiff,
+        threshold: 0.1
+      });
+      return false;
+    }
+  }
+  
+  console.log('✅ DEBUG: Solución guardada es válida');
+  return true;
+}
+
+// Nueva función que valida con las placas actuales (después de applyPlatesGate)
+function isValidSavedSolutionWithCurrentPlates(savedSolution) {
+  console.log('🔍 DEBUG: Validando solución con placas actuales...');
+  
+  if (!savedSolution || typeof savedSolution !== 'object') {
+    console.log('❌ DEBUG: Solución no es un objeto válido');
+    return false;
+  }
+  
+  // Verificar que tenga la estructura correcta
+  const required = ['instances', 'placements', 'placementsByPlate'];
+  const hasRequired = required.every(prop => Array.isArray(savedSolution[prop]));
+  console.log('🔍 DEBUG: Verificando estructura requerida:', {
+    required,
+    hasAll: hasRequired,
+    structure: required.map(prop => ({
+      prop,
+      exists: prop in savedSolution,
+      isArray: Array.isArray(savedSolution[prop]),
+      length: savedSolution[prop]?.length
+    }))
+  });
+  
+  if (!hasRequired) {
+    console.log('❌ DEBUG: Estructura requerida faltante');
+    return false;
+  }
+  
+  // Verificar que la cantidad de placas coincida con las placas actuales
+  const currentPlates = getPlates();
+  const savedPlates = savedSolution.instances?.length || 0;
+  console.log('🔍 DEBUG: Comparando con placas actuales:', {
+    currentPlates: currentPlates.length,
+    savedPlates,
+    match: currentPlates.length === savedPlates,
+    currentPlatesDetails: currentPlates.map((p, i) => ({ i, sw: p.sw, sh: p.sh, sc: p.sc })),
+    savedInstancesDetails: savedSolution.instances?.map((inst, i) => ({ i, sw: inst.sw, sh: inst.sh }))
+  });
+  
+  if (currentPlates.length !== savedPlates) {
+    console.log('❌ DEBUG: Cantidad de placas no coincide con placas actuales');
+    
+    // INTENTO DE ARREGLO: Verificar si es un problema de instancias vs placas únicas
+    console.log('🔧 DEBUG: Intentando arreglo alternativo...');
+    
+    // Calcular total de instancias en placas actuales
+    const totalCurrentInstances = currentPlates.reduce((sum, plate) => sum + (plate.sc || 1), 0);
+    console.log('🔧 DEBUG: Total instancias actuales vs guardadas:', {
+      totalCurrentInstances,
+      savedPlates,
+      match: totalCurrentInstances === savedPlates
+    });
+    
+    // Si el total de instancias coincide, intentar hacer la validación más flexible
+    if (totalCurrentInstances === savedPlates) {
+      console.log('✅ DEBUG: Coincidencia por total de instancias, continuando validación...');
+    } else {
+      return false;
+    }
+  }
+  
+  // Verificar que las dimensiones de placas coincidan con las actuales
+  // Si tenemos instancias individuales vs placas con cantidad, necesitamos validación especial
+  let instanceIndex = 0;
+  for (let plateIndex = 0; plateIndex < currentPlates.length; plateIndex++) {
+    const currentPlate = currentPlates[plateIndex];
+    const plateCount = currentPlate.sc || 1;
+    
+    console.log(`🔍 DEBUG: Validando placa ${plateIndex} con ${plateCount} instancias...`);
+    
+    // Verificar cada instancia de esta placa
+    for (let instInPlate = 0; instInPlate < plateCount; instInPlate++) {
+      if (instanceIndex >= savedSolution.instances.length) {
+        console.log(`❌ DEBUG: No hay suficientes instancias guardadas (faltan a partir de ${instanceIndex})`);
+        return false;
+      }
+      
+      const saved = savedSolution.instances[instanceIndex];
+      
+      console.log(`🔍 DEBUG: Instancia ${instanceIndex} (placa ${plateIndex}.${instInPlate}):`, {
+        current: { sw: currentPlate.sw, sh: currentPlate.sh },
+        saved: saved ? { sw: saved.sw, sh: saved.sh } : null
+      });
+      
+      if (!saved) {
+        console.log(`❌ DEBUG: Instancia ${instanceIndex} faltante`);
+        return false;
+      }
+      
+      const swDiff = Math.abs(currentPlate.sw - saved.sw);
+      const shDiff = Math.abs(currentPlate.sh - saved.sh);
+      
+      if (swDiff > 0.1 || shDiff > 0.1) {
+        console.log(`❌ DEBUG: Dimensiones de instancia ${instanceIndex} no coinciden:`, {
+          swDiff,
+          shDiff,
+          threshold: 0.1
+        });
+        return false;
+      }
+      
+      instanceIndex++;
+    }
+  }
+  
+  console.log('✅ DEBUG: Solución guardada es válida con placas actuales');
+  return true;
+}
+
+// Convertir el estado de rows a pieces para comparación
+function collectPiecesFromState(state) {
+  const pieces = [];
+  let totalRequested = 0;
+  
+  if (!Array.isArray(state.rows)) return pieces;
+  
+  state.rows.forEach((row, idx) => {
+    const qty = row.qty || 0;
+    const w = row.w || 0;
+    const h = row.h || 0;
+    if (!(qty >= 1 && w > 0 && h > 0)) return;
+    
+    const rot = row.rot || false;
+    const rawW = rot ? h : w;
+    const rawH = rot ? w : h;
+    const color = getRowColor(idx);
+    const baseId = totalRequested;
+    
+    for (let i = 0; i < qty; i++) {
+      const pieceId = `${idx}-${baseId + i}`;
+      pieces.push({
+        id: pieceId,
+        rowIdx: idx,
+        rawW,
+        rawH,
+        color,
+        rot,
+        area: rawW * rawH,
+        order: pieces.length,
+        dimKey: dimensionKeyNormalized(rawW, rawH)
+      });
+    }
+    totalRequested += qty;
+  });
+  
+  return pieces;
 }
 
 function loadJSON() {
