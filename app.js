@@ -1626,6 +1626,11 @@ function toggleActionButtons(isReady) {
 
   setState(saveJsonBtn, isReady);
   setState(exportPdfBtn, isReady && isBackofficeAllowed);
+  
+  // Agregar botón CNC
+  const cncBtn = document.querySelector('#cncExportBtn');
+  setState(cncBtn, isReady);
+  
   if (sendCutsBtn) {
     if (sendCutsBtn.dataset.busy === '1') return;
     if (isReady) {
@@ -3583,6 +3588,409 @@ function saveJSON() {
   URL.revokeObjectURL(url);
 }
 
+// ============ GENERACIÓN DE ARCHIVOS CNC ============
+
+function generateCNCFiles() {
+  const solution = lastSuccessfulSolution || solveCutLayoutInternal();
+  if (!solution || !solution.instances || solution.instances.length === 0) {
+    alert('No hay placas optimizadas para generar archivos CNC');
+    return;
+  }
+
+  console.log('🔧 Generando archivos CNC para', solution.instances.length, 'placas');
+  
+  // Generar archivo para cada placa
+  solution.instances.forEach((instance, plateIndex) => {
+    const placements = solution.placementsByPlate[plateIndex] || [];
+    
+    if (placements.length === 0) {
+      console.log(`⚠️ Placa ${plateIndex + 1} sin piezas, omitiendo...`);
+      return;
+    }
+
+    const cncData = generateCNCForPlate(instance, placements, plateIndex);
+    const extension = String(plateIndex + 1).padStart(3, '0');
+    const projectName = (projectNameEl?.value || '').trim();
+    const filename = projectName ? 
+      `${projectName.replace(/\s+/g, '_')}.${extension}` : 
+      `placa_${plateIndex + 1}.${extension}`;
+    
+    downloadCNCFile(cncData, filename);
+    console.log(`✅ Generado: ${filename}`);
+  });
+  
+  alert(`Se generaron ${solution.instances.length} archivos CNC`);
+}
+
+function generateCNCForPlate(instance, placements, plateIndex) {
+  const plateW = instance.sw;
+  const plateH = instance.sh;
+  const kerf = parseInt(kerfInput?.value || '3', 10);
+  const materialName = currentMaterialName || 'MDF';
+  
+  console.log(`🔧 Generando CNC para placa ${plateIndex + 1}:`, {
+    dimensiones: `${plateW}x${plateH}`,
+    piezas: placements.length,
+    material: materialName
+  });
+
+  // Función para formatear valores CNC (parte entera de 5 caracteres)
+  function formatCNCValue(value) {
+    const fixed = value.toFixed(6);
+    const [integerPart, decimalPart] = fixed.split('.');
+    const paddedInteger = integerPart.padStart(5, ' ');
+    return `${paddedInteger}.${decimalPart}`;
+  }
+  
+  // Generar header
+  let content = `[Intestazione]\n`;
+  content += `Descrizione=${materialName.toLowerCase()}\n`;
+  content += `Lunghezza= ${plateW.toFixed(6)}\n`;
+  content += `Larghezza= ${plateH.toFixed(6)}\n`;
+  content += `Spessore=   18.000000\n`;
+  content += `AltPacco=   67.000000\n`;
+  content += `VelRotaz=3000\n`;
+  content += `VelAvanz=30.000000\n\n\n`;
+
+  // Generar secuencia de cortes
+  // Obtener valor de refilado de la primera placa (aplica para X e Y)
+  const firstPlate = getPlates()[0];
+  const initialTrim = firstPlate?.trim?.mm || 13; // Valor por defecto si no hay placas
+  
+  const cutData = generateCutSequence(placements, plateW, plateH, kerf, initialTrim);
+  
+  content += `[Righe]\n`;
+  content += `NumeroRighe=${cutData.cuts.length}\n`;
+  cutData.cuts.forEach((cut, i) => {
+    // Formatear el valor para que la parte entera ocupe 5 caracteres
+    const formattedValue = formatCNCValue(cut.value);
+    content += `${i + 1}=${cut.type},${formattedValue},1,0.000000,0.000000,0.000000,0.000000\n`;
+  });
+  content += `\n`;
+
+  // Generar datos de piezas
+  content += `[Dati]\n`;
+  content += `NumeroDati=${cutData.pieces.length}\n`;
+  cutData.pieces.forEach((piece, i) => {
+    const edges = piece.edges || ['', '', '', '']; // Array de 4 elementos
+    
+    // El tercer parámetro debe ser el número de cortes (piece.quantity)
+    content += `${i + 1}=,,${piece.quantity},${materialName.toLowerCase()} ,,2     ,${piece.w.toFixed(2)},${piece.h.toFixed(2)},18.00,,1,${piece.quantity}`;
+    
+    // Agregar los 4 valores de cubre canto en orden: superior, inferior, izquierdo, derecho
+    content += `,${edges[0] || ''},${edges[1] || ''},${edges[2] || ''},${edges[3] || ''},,`;
+    content += `\n`;
+  });
+  content += `\n`;
+
+  // Generar referencias
+  content += `[Riferimenti]\n`;
+  cutData.cuts.forEach((cut, i) => {
+    content += `${i + 1}=${cut.reference || ''}\n`;
+  });
+
+  return content;
+}
+
+function generateCutSequence(placements, plateW, plateH, kerf, initialTrim = 13) {
+  console.log('🔧 Generando secuencia de cortes para', placements.length, 'piezas');
+  console.log('🔧 Usando refilado inicial:', initialTrim, 'mm');
+  
+  const cuts = [];
+  const pieces = [];
+  const pieceMap = new Map();
+  let pieceCounter = 1;
+
+  // Usar el valor de refilado ingresado por el usuario (aplica para X e Y)
+  const initialTrimY = initialTrim;
+  const initialTrimX = initialTrim;
+
+  // Agrupar piezas por dimensiones y propiedades
+  placements.forEach(placement => {
+    // Usar dimensiones originales restando el kerf si es necesario
+    const w = placement.originalW || (placement.w - kerf);
+    const h = placement.originalH || (placement.h - kerf);
+    const rot = placement.rot ? 1 : 0;
+    const edgeInfo = getEdgesForPiece(placement);
+    const edges = edgeInfo.values.join(','); // Unir con comas para el key
+    const key = `${w}x${h}_rot${rot}_${edges}`;
+    
+    if (!pieceMap.has(key)) {
+      pieceMap.set(key, {
+        id: pieceCounter++,
+        w: w,
+        h: h,
+        quantity: 1,
+        rotation: rot,
+        edges: edgeInfo.values, // Usar el array de valores
+        positions: [{ x: placement.x, y: placement.y }]
+      });
+    } else {
+      pieceMap.get(key).quantity++;
+      pieceMap.get(key).positions.push({ x: placement.x, y: placement.y });
+    }
+  });
+
+  // Convertir mapa a array de piezas
+  Array.from(pieceMap.values()).forEach(piece => {
+    pieces.push(piece);
+  });
+
+  // Generar secuencia de cortes estilo guillotina
+  // Refilado inicial Y (independiente del kerf)
+  cuts.push({ type: 'RY', value: initialTrimY, reference: '' });
+
+  // Después del refilado, cortar hasta el final de la primera franja
+  // Usar altura original sin kerf
+  const firstRowPlacements = placements.filter(p => p.y < 50);
+  const firstRowHeight = Math.max(...firstRowPlacements.map(p => p.originalH || (p.h - kerf)));
+  cuts.push({ type: 'Y', value: firstRowHeight, reference: '' });
+
+  // Crear grupos de cortes por filas
+  const rowGroups = createRowGroups(placements);
+  
+  rowGroups.forEach((rowPlacements, rowIndex) => {
+    // Usar altura original sin kerf
+    const rowHeight = Math.max(...rowPlacements.map(p => p.originalH || (p.h - kerf)));
+    
+    // Para filas posteriores a la primera: moverse a la nueva posición Y
+    if (rowIndex > 0) {
+      // Calcular cuánto moverse desde la posición actual
+      const currentY = getCurrentY(cuts);
+      const targetY = currentY + rowHeight; // Moverse una altura de fila
+      cuts.push({ type: 'Y', value: rowHeight, reference: '' });
+    }
+
+    // Ordenar piezas en la fila por posición X
+    const sortedRow = [...rowPlacements].sort((a, b) => a.x - b.x);
+    
+    // Refilado X una sola vez por franja/fila
+    cuts.push({ type: 'RX', value: initialTrimX, reference: '' });
+    
+    sortedRow.forEach((placement, pieceInRowIndex) => {
+      const realHeight = placement.originalH || (placement.h - kerf);
+      
+      // Corte X para separar la pieza (usar dimensión original sin kerf)
+      const pieceData = findPieceForPlacement(pieces, placement);
+      const pieceRef = pieceData ? `(${pieceData.id})` : '';
+      const realWidth = placement.originalW || (placement.w - kerf);
+      
+      cuts.push({ type: 'X', value: realWidth, reference: pieceRef });
+      
+      // Verificar si necesitamos U* (fin de bloque)
+      // Esto ocurre cuando la pieza actual tiene altura de fila Y la siguiente tiene altura diferente
+      const isCurrentHeightSameAsRow = realHeight === rowHeight;
+      const hasNextPiece = pieceInRowIndex < sortedRow.length - 1;
+      
+      if (isCurrentHeightSameAsRow && hasNextPiece) {
+        const nextPlacement = sortedRow[pieceInRowIndex + 1];
+        const nextHeight = nextPlacement.originalH || (nextPlacement.h - kerf);
+        const isNextHeightDifferent = nextHeight !== rowHeight;
+        
+        if (isNextHeightDifferent) {
+          cuts.push({ type: 'U*', value: 0, reference: '' });
+        }
+      }
+      
+      // Para piezas con altura diferente a la fila: cambio de zona U
+      if (realHeight !== rowHeight) {
+        cuts.push({ type: 'U', value: realHeight, reference: '' });
+      }
+    });
+    
+    // No hacer corte Y aquí - se hará al inicio de la siguiente fila si es necesario
+    
+    // Descargar todas las piezas de la fila
+    sortedRow.forEach(p => {
+      const pData = findPieceForPlacement(pieces, p);
+      if (pData) {
+        const realHeight = p.originalH || (p.h - kerf);
+        cuts.push({ type: 'U', value: realHeight, reference: '' });
+      }
+    });
+  });
+
+  console.log('✅ Secuencia generada:', cuts.length, 'cortes para', pieces.length, 'tipos de piezas');
+  
+  return { cuts, pieces };
+}
+
+function createRowGroups(placements) {
+  // Agrupar piezas por filas (misma posición Y aproximada)
+  const tolerance = 5; // mm de tolerancia para considerar misma fila
+  const rows = [];
+  
+  const sortedByY = [...placements].sort((a, b) => a.y - b.y);
+  
+  sortedByY.forEach(placement => {
+    // Buscar fila existente
+    let foundRow = rows.find(row => 
+      Math.abs(row[0].y - placement.y) <= tolerance
+    );
+    
+    if (foundRow) {
+      foundRow.push(placement);
+    } else {
+      rows.push([placement]);
+    }
+  });
+  
+  return rows;
+}
+
+function getCurrentY(cuts) {
+  // Calcular posición Y actual basada en cortes previos
+  let currentY = 0;
+  cuts.forEach(cut => {
+    if (cut.type === 'Y') {
+      currentY += cut.value;
+    }
+  });
+  return currentY;
+}
+
+function findPieceForPlacement(pieces, placement) {
+  // Encontrar la pieza correspondiente a un placement
+  const w = placement.w;
+  const h = placement.h;
+  const rot = placement.rot ? 1 : 0;
+  const edges = getEdgesForPlacement(placement);
+  
+  return pieces.find(piece => 
+    piece.w === w && 
+    piece.h === h && 
+    piece.rotation === rot &&
+    piece.edges === edges
+  );
+}
+
+function getEdgesForPiece(placement) {
+  // Obtener información de cantos desde la fila original
+  try {
+    const rows = getRows();
+    const row = rows[placement.rowIdx];
+    if (!row) return { legacy: '    ', values: ['', '', '', ''] };
+    
+    return getEdgesFromRow(row);
+  } catch (error) {
+    console.warn('Error obteniendo cantos:', error);
+    return { legacy: '    ', values: ['', '', '', ''] }; // [top, bottom, left, right]
+  }
+}
+
+function getEdgesForPlacement(placement) {
+  return getEdgesForPiece(placement);
+}
+
+function getEdgesFromRow(row) {
+  // Extraer información de cantos seleccionados en la row
+  const edgeElements = row.querySelectorAll('line.edge[data-selected="1"]');
+  
+  // Usar el mismo método que se usa en otras partes del código
+  const widthEdgeSelect = row._edgeSelects?.width || row.querySelector('select[data-role="width-edge"]');
+  const heightEdgeSelect = row._edgeSelects?.height || row.querySelector('select[data-role="height-edge"]');
+  
+  // Obtener valores seleccionados de los selectores
+  const horizontalEdgeValue = widthEdgeSelect?.value || '';
+  const verticalEdgeValue = heightEdgeSelect?.value || '';
+  
+  // Debug: Investigar la estructura de los elementos edge
+  console.log('🔍 DEBUG getEdgesFromRow:', {
+    edgeElements: edgeElements.length,
+    horizontalEdgeValue,
+    verticalEdgeValue
+  });
+  
+  // Crear array para los 4 lados en el orden correcto: [top, bottom, left, right]
+  const edgeValues = ['', '', '', ''];
+  
+  // Investigar todos los elementos edge disponibles, no solo los seleccionados
+  const allEdges = row.querySelectorAll('line.edge');
+  console.log('🔍 DEBUG todos los edges:', allEdges.length);
+  
+  allEdges.forEach((edge, index) => {
+    const isSelected = edge.dataset.selected === '1';
+    const side = edge.dataset.side;
+    const classList = Array.from(edge.classList);
+    
+    console.log(`🔍 DEBUG edge ${index}:`, {
+      isSelected,
+      side,
+      classList,
+      attributes: Array.from(edge.attributes).map(attr => `${attr.name}="${attr.value}"`)
+    });
+    
+    if (isSelected) {
+      // Intentar determinar el lado por el índice o clase
+      if (index === 0 || classList.includes('top')) {
+        edgeValues[0] = horizontalEdgeValue; // top
+      } else if (index === 1 || classList.includes('right')) {
+        edgeValues[3] = verticalEdgeValue; // right
+      } else if (index === 2 || classList.includes('bottom')) {
+        edgeValues[1] = horizontalEdgeValue; // bottom
+      } else if (index === 3 || classList.includes('left')) {
+        edgeValues[2] = verticalEdgeValue; // left
+      }
+    }
+  });
+  
+  console.log('🔍 DEBUG resultado edgeValues:', edgeValues);
+  
+  return {
+    legacy: edgeElements.length > 0 ? 'X' : ' ', // Para compatibilidad
+    values: edgeValues // [top, bottom, left, right]
+  };
+}
+
+function downloadCNCFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Agregar botón CNC a la interfaz
+function addCNCExportButton() {
+  // Buscar el contenedor de botones de exportación
+  const exportSection = document.querySelector('.export-section') || 
+                       document.querySelector('.btn-group') ||
+                       exportPdfBtn?.parentElement;
+  
+  if (!exportSection) {
+    console.warn('No se encontró sección de exportación para agregar botón CNC');
+    return;
+  }
+  
+  // Verificar si ya existe el botón
+  if (document.querySelector('#cncExportBtn')) return;
+  
+  const cncBtn = document.createElement('button');
+  cncBtn.id = 'cncExportBtn';
+  cncBtn.className = exportPdfBtn ? exportPdfBtn.className : 'btn btn-secondary';
+  cncBtn.innerHTML = '🔧 Generar CNC';
+  cncBtn.title = 'Generar archivos CNC (.001, .002, etc.) para máquina de corte';
+  cncBtn.style.marginLeft = '5px';
+  cncBtn.onclick = generateCNCFiles;
+  
+  exportSection.appendChild(cncBtn);
+  console.log('✅ Botón CNC agregado a la interfaz');
+  
+  // Inicializar el estado del botón
+  const isReady = isSheetComplete();
+  if (isReady) {
+    cncBtn.disabled = false;
+    cncBtn.classList.remove('disabled-btn');
+  } else {
+    cncBtn.disabled = true;
+    cncBtn.classList.add('disabled-btn');
+  }
+}
+
 function cloneSvgForExport(svgEl) {
   const clone = svgEl.cloneNode(true);
   const svgNS = 'http://www.w3.org/2000/svg';
@@ -4026,6 +4434,13 @@ function loadState(state) {
   }
   
   persistState();
+  
+  // Actualizar estado de botones después de cargar
+  setTimeout(() => {
+    const isReady = isSheetComplete();
+    toggleActionButtons(isReady);
+    console.log('🔧 Botones actualizados después de cargar estado:', isReady);
+  }, 200);
 }
 
 // ✅ NUEVAS FUNCIONES AUXILIARES PARA SOLUCIONES GUARDADAS
@@ -5678,6 +6093,11 @@ async function renderSheetOverview() {
   }
   updateRowSummaryUI();
   
+  // Actualizar estado de botones después de renderizar la solución
+  const isReady = isSheetComplete();
+  toggleActionButtons(isReady);
+  console.log('🔧 Botones actualizados después de renderizar solución:', isReady);
+  
   } catch (error) {
     console.error('Error en renderSheetOverview:', error);
     loadingManager.hideLoading('sheet-overview');
@@ -5859,3 +6279,25 @@ if (saveGaBtn && gaIdInput) {
     alert('GA4 ID guardado localmente. Recargá la página para iniciar el tracking.');
   });
 }
+
+// ============ INICIALIZACIÓN CNC ============
+
+// Inicializar botón CNC cuando la página esté lista
+document.addEventListener('DOMContentLoaded', () => {
+  // Esperar un poco para que todos los elementos estén cargados
+  setTimeout(() => {
+    addCNCExportButton();
+  }, 2000); // Aumentar tiempo de espera
+  
+  // Intentar agregar el botón periódicamente hasta que aparezca
+  const interval = setInterval(() => {
+    if (!document.querySelector('#cncExportBtn')) {
+      addCNCExportButton();
+    } else {
+      clearInterval(interval);
+    }
+  }, 3000);
+  
+  // Limpiar intervalo después de 30 segundos
+  setTimeout(() => clearInterval(interval), 30000);
+});
