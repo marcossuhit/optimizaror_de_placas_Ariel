@@ -5078,6 +5078,20 @@ function buildSummaryReportAdmin() {
     });
   }
 
+  // COSTO TOTAL GENERAL (placas + cubre canto)
+  const totalPlates = lastPlateCostSummary.total || 0;
+  const totalEdge = lastEdgeCostSummary.totalCost || 0;
+  const grandTotal = totalPlates + totalEdge;
+  
+  if (grandTotal > 0) {
+    lines.push('');
+    lines.push('💵 TOTAL GENERAL:');
+    pushLine(`- Placas: $${fmt(totalPlates, 2)}`);
+    pushLine(`- Cubre canto: $${fmt(totalEdge, 2)}`);
+    pushLine(`- ═══════════════════`);
+    pushLine(`- TOTAL: $${fmt(grandTotal, 2)}`);
+  }
+
   return buildSummaryReportCommon(lines, pushLine, fmt);
 }
 
@@ -5340,13 +5354,14 @@ async function handleSendCuts() {
     const jsonFilename = `${slug || 'cortes'}-proyecto.json`;
     // NO descargar localmente, solo adjuntar a emails
     const subjectName = rawName || title || 'Plano de cortes';
-    const bodyText = `Se adjunta la configuración de cortes "${subjectName}" generado desde la aplicación. Para su futuro uso.`;
+    const adminBodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
+    const clientBodyText = `Se adjunta la configuración de cortes "${subjectName}" generado desde la aplicación. Para su futuro uso.`;
     const adminEmail = 'marcossuhit@gmail.com';
     const recipientsSent = [];
     const sendErrors = [];
 
-    const buildAdminBody = () => `${bodyText}\n\n${buildSummaryReportAdmin()}`;
-    const buildClientBody = () => `${bodyText}\n\n${buildSummaryReportClient()}`;
+    const buildAdminBody = () => `${adminBodyText}\n\n${buildSummaryReportAdmin()}`;
+    const buildClientBody = () => `${clientBodyText}\n\n${buildSummaryReportClient()}`;
     
     const sendTo = async (to, text, { attachPdf = true, attachJson = true } = {}) => {
       const attachments = [];
