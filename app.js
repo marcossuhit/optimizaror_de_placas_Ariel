@@ -5279,13 +5279,25 @@ async function sendPlainEmail({ from, to, subject, text }) {
   return sendEmailViaProvider({ from, to, subject, text, attachments: [], replyTo: from });
 }
 
-async function sendEmailWithAttachment({ from, to, subject, text, filename, blob }) {
-  const attachments = [];
+async function sendEmailWithAttachment({ from, to, subject, text, filename, blob, attachments = [] }) {
+  const emailAttachments = [];
+  
+  // Si se pasa un blob individual (para compatibilidad)
   if (blob && filename) {
     const base64 = await blobToBase64(blob);
-    attachments.push({ filename, content: base64, mimeType: 'application/pdf' });
+    emailAttachments.push({ filename, content: base64, mimeType: 'application/pdf' });
   }
-  return sendEmailViaProvider({ from, to, subject, text, attachments, replyTo: from });
+  
+  // Agregar adjuntos adicionales
+  for (const att of attachments) {
+    if (att.blob && att.filename) {
+      const base64 = await blobToBase64(att.blob);
+      const mimeType = att.mimeType || 'application/octet-stream';
+      emailAttachments.push({ filename: att.filename, content: base64, mimeType });
+    }
+  }
+  
+  return sendEmailViaProvider({ from, to, subject, text, attachments: emailAttachments, replyTo: from });
 }
 
 async function handleSendCuts() {
@@ -5326,7 +5338,7 @@ async function handleSendCuts() {
     const jsonState = serializeState();
     const jsonBlob = new Blob([JSON.stringify(jsonState, null, 2)], { type: 'application/json' });
     const jsonFilename = `${slug || 'cortes'}-proyecto.json`;
-    triggerBlobDownload(jsonFilename, jsonBlob);
+    // NO descargar localmente, solo adjuntar a emails
     const subjectName = rawName || title || 'Plano de cortes';
     const bodyText = `Se adjunta la configuración de cortes "${subjectName}" generado desde la aplicación. Para su futuro uso.`;
     const adminEmail = 'marcossuhit@gmail.com';
@@ -5335,24 +5347,37 @@ async function handleSendCuts() {
 
     const buildAdminBody = () => `${bodyText}\n\n${buildSummaryReportAdmin()}`;
     const buildClientBody = () => `${bodyText}\n\n${buildSummaryReportClient()}`;
-    const sendTo = async (to, text, { attachPdf = true } = {}) => {
-      if (!attachPdf) {
+    
+    const sendTo = async (to, text, { attachPdf = true, attachJson = true } = {}) => {
+      const attachments = [];
+      
+      // Adjuntar PDF si se solicita
+      if (attachPdf && pdfBlob) {
+        attachments.push({ blob: pdfBlob, filename, mimeType: 'application/pdf' });
+      }
+      
+      // Adjuntar JSON si se solicita
+      if (attachJson && jsonBlob) {
+        attachments.push({ blob: jsonBlob, filename: jsonFilename, mimeType: 'application/json' });
+      }
+      
+      if (attachments.length === 0) {
         await sendPlainEmail({ from: fromEmail, to, subject: `Plano de cortes - ${subjectName}`, text });
         return;
       }
+      
       await sendEmailWithAttachment({
         from: fromEmail,
         to,
         subject: `Plano de cortes - ${subjectName}`,
         text,
-        filename,
-        blob: pdfBlob
+        attachments
       });
     };
 
     if (adminEmail) {
       try {
-        await sendTo(adminEmail, buildAdminBody());
+        await sendTo(adminEmail, buildAdminBody(), { attachPdf: true, attachJson: true });
         recipientsSent.push(adminEmail);
       } catch (err) {
         console.error('No se pudo enviar al administrador', err);
@@ -5363,9 +5388,9 @@ async function handleSendCuts() {
     const userEmail = (authUser.email || '').trim();
     if (userEmail) {
       const greeting = authUser.name ? `Hola ${authUser.name.trim()},` : 'Hola,';
-      const userText = `${greeting}\n\n${buildClientBody()}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
+      const userText = `${greeting}\n\n${buildClientBody()}\n\nSe adjunta el archivo JSON del proyecto para que puedas importarlo nuevamente en la app.`;
       try {
-        await sendTo(userEmail, userText, { attachPdf: false });
+        await sendTo(userEmail, userText, { attachPdf: false, attachJson: true });
         recipientsSent.push(userEmail);
       } catch (err) {
         console.error('No se pudo enviar al usuario final', err);
@@ -5373,7 +5398,7 @@ async function handleSendCuts() {
       }
     }
 
-    const downloadNotice = 'También se descargó una copia local para que puedas importarla en la app y seguir editando sin volver a cargar los cortes.';
+    const downloadNotice = 'Los archivos se enviaron por correo electrónico.';
     if (sendErrors.length) {
       if (sendErrors.some(msg => /Proveedor de email no configurado/.test(String(msg)))) {
         sendErrors.push('Configurá window.EMAIL_PROVIDER_ENDPOINT o window.GenericMailProvider para habilitar el envío automático de correos.');
