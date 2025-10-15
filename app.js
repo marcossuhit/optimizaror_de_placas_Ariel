@@ -1,5 +1,12 @@
 const MAX_ROWS = Number.MAX_SAFE_INTEGER;
 
+// Flag para indicar si estamos mostrando el plano del optimizador avanzado
+let showingAdvancedOptimization = false;
+
+// Cache para evitar optimizaciones innecesarias
+let lastOptimizationHash = null;
+let lastOptimizationResult = null;
+
 const rowsEl = document.getElementById('rows');
 const addRowBtn = document.getElementById('addRowBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
@@ -13,6 +20,7 @@ const autoRotateToggle = document.getElementById('autoRotateToggle');
 const plateMaterialSelect = document.getElementById('plateMaterialSelect');
 const manageStockBtn = document.getElementById('manageStockBtn');
 const themeToggleBtn = document.getElementById('themeToggle');
+const generateLayoutBtn = document.getElementById('generateLayoutBtn');
 const stackSection = document.querySelector('.stack');
 const platesControlsEl = document.querySelector('.plates-controls');
 const plateLimitNoteEl = platesControlsEl?.querySelector('.limit-note') || null;
@@ -25,6 +33,8 @@ let kerfInput = document.getElementById('kerfInput');
 let kerfFieldWrapper = kerfInput ? kerfInput.closest('.kerf-field') : null;
 let pendingKerfValue = kerfInput && kerfInput.value ? kerfInput.value : '5';
 const summaryTotalEl = document.getElementById('summaryTotal');
+const summaryPlatesValueEl = document.getElementById('summaryPlatesValue');
+const summaryGrandTotalEl = document.getElementById('summaryGrandTotal');
 const summaryListEl = document.getElementById('summaryList');
 const sheetCanvasEl = document.getElementById('sheetCanvas');
 const sheetOverviewSection = document.querySelector('.sheet-overview');
@@ -449,8 +459,8 @@ async function performLayoutRecalc() {
     refreshAllPreviews();
     recalcEdgebanding();
     
-    // Luego renderizar overview (puede ser asíncrono con worker)
-    await renderSheetOverview();
+    // SIEMPRE usar el optimizador avanzado
+    await renderWithAdvancedOptimizer();
   } catch (error) {
     console.error('Error en performLayoutRecalc:', error);
   } finally {
@@ -787,6 +797,88 @@ function resetSummaryUI() {
   if (summaryUtilEl) summaryUtilEl.textContent = '';
   if (summaryTotalEl) summaryTotalEl.textContent = '';
   if (summaryListEl) summaryListEl.innerHTML = '';
+  if (summaryPlatesValueEl) summaryPlatesValueEl.innerHTML = '';
+  if (summaryGrandTotalEl) summaryGrandTotalEl.innerHTML = '';
+  
+  // Resetear flag de optimización avanzada y cache
+  showingAdvancedOptimization = false;
+  lastOptimizationHash = null;
+  lastOptimizationResult = null;
+}
+
+/**
+ * Actualiza el resumen con datos del optimizador avanzado
+ */
+function updateSummaryWithAdvancedReport(report) {
+  if (!report || !report.summary) return;
+  
+  const summary = report.summary;
+  
+  // NO actualizar los elementos numéricos del resumen (se ocultan en CSS)
+  // Solo actualizar la sección de detalles por placa
+  
+  // Actualizar información de costo de placas
+  const plateCount = summary.plateCount || 0;
+  const materialPrice = getMaterialPrice(currentMaterialName);
+  const totalPlateCost = materialPrice * plateCount;
+  
+  lastPlateCostSummary = {
+    unit: materialPrice,
+    total: totalPlateCost,
+    count: plateCount,
+    material: currentMaterialName || ''
+  };
+  
+  // Crear resumen detallado por placa
+  if (summaryListEl) {
+    summaryListEl.innerHTML = '';
+    
+    // Resultados por placa
+    report.plates.forEach((plate, idx) => {
+      // Obtener datos del reporte
+      const plateData = report.summary;
+      const plateWidth = parseFloat(plate.dimensions.split('×')[0].trim());
+      const plateHeight = parseFloat(plate.dimensions.split('×')[1].replace('mm', '').trim());
+      const plateAreaMm2 = plateWidth * plateHeight;
+      const plateAreaM2 = (plateAreaMm2 / 1_000_000).toFixed(2);
+      
+      const utilizationPercent = parseFloat(plate.utilization.replace('%', ''));
+      const wastePercent = (100 - utilizationPercent).toFixed(2);
+      const usedAreaM2 = (parseFloat(plate.usedArea) / 1_000_000).toFixed(3);
+      const wasteAreaM2 = ((plateAreaMm2 - parseFloat(plate.usedArea)) / 1_000_000).toFixed(3);
+      
+      const plateDiv = document.createElement('div');
+      plateDiv.style.cssText = 'background:#0e1629;padding:12px;margin-bottom:10px;border-radius:6px;border:1px solid #1e293b;';
+      plateDiv.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:8px;color:#fbbf24;font-size:1.05em;">📋 Placa ${plate.plateNumber} de ${report.summary.plateCount}</div>
+        <div style="font-size:0.9em;color:#94a3b8;line-height:1.6;">
+          <div style="margin-bottom:4px;">📐 <span style="color:#cbd5e1;">Dimensiones:</span> ${plate.dimensions} <span style="color:#64748b;">(${plateAreaM2} m²)</span></div>
+          <div style="margin-bottom:4px;">📦 <span style="color:#cbd5e1;">Piezas colocadas:</span> ${plate.pieces}</div>
+          <div style="margin-bottom:4px;">📊 <span style="color:#cbd5e1;">Utilización:</span> <span style="color:#10b981;font-weight:600;">${plate.utilization}</span></div>
+          <div style="margin-bottom:4px;">♻️ <span style="color:#cbd5e1;">Desperdicio:</span> <span style="color:#ef4444;font-weight:600;">${wastePercent}%</span> <span style="color:#64748b;">(${wasteAreaM2} m²)</span></div>
+          <div style="margin-bottom:4px;">✅ <span style="color:#cbd5e1;">Área utilizada:</span> ${usedAreaM2} m²</div>
+          <div style="margin-bottom:4px;">🔪 <span style="color:#cbd5e1;">Cortes totales:</span> ${plate.cutSequence.sequence.length} <span style="color:#64748b;">(${plate.cutSequence.vertical.length} vert. + ${plate.cutSequence.horizontal.length} horiz.)</span></div>
+        </div>
+      `;
+      summaryListEl.appendChild(plateDiv);
+    });
+    
+    // Piezas sin colocar
+    if (report.remaining.length > 0) {
+      const remainingDiv = document.createElement('div');
+      remainingDiv.style.cssText = 'background:#7f1d1d;padding:12px;margin-top:10px;border-radius:6px;border:1px solid #991b1b;';
+      remainingDiv.innerHTML = `
+        <div style="font-weight:bold;color:#fca5a5;margin-bottom:6px;font-size:1.05em;">⚠️ Piezas sin colocar: ${report.remaining.length}</div>
+        <div style="font-size:0.85em;color:#fecaca;line-height:1.5;">
+          ${report.remaining.map(p => `• ${p.dimensions}`).join('<br>')}
+        </div>
+      `;
+      summaryListEl.appendChild(remainingDiv);
+    }
+  }
+  
+  // Actualizar secciones de costos
+  updateCostSummary();
 }
 
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
@@ -1236,12 +1328,13 @@ function showPieceDoesNotFitAlert() {
 }
 
 function scheduleAutoPlateCheck() {
-  if (pendingAutoPlateAllocation || autoPlateAllocationInProgress) return;
-  pendingAutoPlateAllocation = true;
-  requestAnimationFrame(async () => {
-    pendingAutoPlateAllocation = false;
-    await ensurePlateCapacity();
-  });
+  // DESHABILITADO: La optimización ahora solo se ejecuta con el botón "GENERAR PLANO"
+  // if (pendingAutoPlateAllocation || autoPlateAllocationInProgress) return;
+  // pendingAutoPlateAllocation = true;
+  // requestAnimationFrame(async () => {
+  //   pendingAutoPlateAllocation = false;
+  //   await ensurePlateCapacity();
+  // });
 }
 
 async function ensurePlateCapacity() {
@@ -1627,9 +1720,10 @@ function toggleActionButtons(isReady) {
   setState(saveJsonBtn, isReady);
   setState(exportPdfBtn, isReady && isBackofficeAllowed);
   
-  // Agregar botón CNC
-  const cncBtn = document.querySelector('#cncExportBtn');
-  setState(cncBtn, isReady);
+  // Habilitar botones de limpiar solo si hay filas
+  const hasRows = currentRowCount() > 0;
+  setState(clearAllBtn, hasRows);
+  setState(resetAllBtn, isReady || hasRows);
   
   if (sendCutsBtn) {
     if (sendCutsBtn.dataset.busy === '1') return;
@@ -1657,57 +1751,331 @@ function getKerfMm() {
   return v;
 }
 
-const PACKING_EPSILON = 0.0001;
-const META_SETTINGS = {
-  minIterations: 25,
-  perPieceFactor: 4,
-  maxIterations: 300,
-  temperatureStart: 1.8,
-  temperatureCool: 0.92,
-  temperatureMin: 0.08,
-  minPerturbation: 0.08,
-  maxPerturbation: 0.45,
-  missingAreaWeight: 6,
-  missingPiecePenaltyFactor: 48,
-  randomRestarts: 5,
-  globalLoopsFactor: 0.45,
-  maxGlobalLoops: 50,
-  seedOrderSamples: 6
-};
+function buildWorkerPayload(inputs) {
+  if (!inputs) return null;
 
-function getAdaptiveMetaSettings(pieceCount) {
-  const settings = { ...META_SETTINGS };
-  
-  if (pieceCount > 50) {
-    // Ultra conservador para 50+ piezas
-    settings.maxIterations = 40;        // Drásticamente reducido
-    settings.randomRestarts = 1;        // Solo un restart
-    settings.maxGlobalLoops = 8;        // Muy pocos loops
-    settings.seedOrderSamples = 2;      // Mínimas muestras
-    settings.perPieceFactor = 1.5;      // Factor muy bajo
-    settings.temperatureStart = 0.8;    // Temperatura baja
-    settings.temperatureCool = 0.85;    // Enfriamiento rápido
-    settings.missingPiecePenaltyFactor = 20;
-  } else if (pieceCount > 35) {
-    settings.maxIterations = 60;
-    settings.randomRestarts = 2;
-    settings.maxGlobalLoops = 12;
-    settings.seedOrderSamples = 3;
-    settings.perPieceFactor = 2.0;
-    settings.temperatureStart = 1.0;
-    settings.temperatureCool = 0.87;
-  } else if (pieceCount > 25) {
-    settings.maxIterations = 80;
-    settings.randomRestarts = 2;
-    settings.maxGlobalLoops = 15;
-    settings.perPieceFactor = 2.5;
-  } else if (pieceCount > 20) {
-    settings.maxIterations = 100;
-    settings.randomRestarts = 3;
-    settings.perPieceFactor = 3.0;
+  const sanitizeTrim = (trim) => {
+    if (!trim || typeof trim !== 'object') {
+      return { mm: 0, top: false, right: false, bottom: false, left: false };
+    }
+    return {
+      mm: Number.isFinite(trim.mm) ? trim.mm : 0,
+      top: !!trim.top,
+      right: !!trim.right,
+      bottom: !!trim.bottom,
+      left: !!trim.left
+    };
+  };
+
+  const sanitizeInstance = (instance) => {
+    if (!instance || typeof instance !== 'object') return null;
+    return {
+      sw: Number.isFinite(instance.sw) ? instance.sw : 0,
+      sh: Number.isFinite(instance.sh) ? instance.sh : 0,
+      trim: sanitizeTrim(instance.trim),
+      trimTop: Number.isFinite(instance.trimTop) ? instance.trimTop : undefined,
+      trimRight: Number.isFinite(instance.trimRight) ? instance.trimRight : undefined,
+      trimBottom: Number.isFinite(instance.trimBottom) ? instance.trimBottom : undefined,
+      trimLeft: Number.isFinite(instance.trimLeft) ? instance.trimLeft : undefined,
+      material: typeof instance.material === 'string' ? instance.material : undefined,
+      plateRow: Number.isFinite(instance.plateRow) ? instance.plateRow : undefined
+    };
+  };
+
+  const sanitizePiece = (piece) => {
+    if (!piece || typeof piece !== 'object') return null;
+    return {
+      id: piece.id,
+      rowIdx: Number.isFinite(piece.rowIdx) ? piece.rowIdx : 0,
+      rawW: Number.isFinite(piece.rawW) ? piece.rawW : 0,
+      rawH: Number.isFinite(piece.rawH) ? piece.rawH : 0,
+      color: typeof piece.color === 'string' ? piece.color : '#ccc',
+      rot: !!piece.rot,
+      area: Number.isFinite(piece.area) ? piece.area : (Number(piece.rawW) * Number(piece.rawH)) || 0,
+      dimKey: typeof piece.dimKey === 'string' ? piece.dimKey : undefined
+    };
+  };
+
+  const instances = Array.isArray(inputs.instances)
+    ? inputs.instances.map(sanitizeInstance).filter(Boolean)
+    : [];
+  const pieces = Array.isArray(inputs.pieces)
+    ? inputs.pieces.map(sanitizePiece).filter(Boolean)
+    : [];
+
+  return {
+    instances,
+    pieces,
+    totalRequested: Number.isFinite(inputs.totalRequested) ? inputs.totalRequested : pieces.length,
+    allowAutoRotate: !!inputs.allowAutoRotate,
+    kerf: Number.isFinite(inputs.kerf) ? inputs.kerf : 0
+  };
+}
+
+const PACKING_EPSILON = 0.0001;
+
+function computeTrimOffsetsLocal(instance) {
+  const offsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (!instance || typeof instance !== 'object') return offsets;
+  const trim = instance.trim || {};
+  const mm = Number.isFinite(trim.mm) ? Math.max(0, trim.mm) : null;
+  const pick = (flag, fallbackValue) => {
+    if (flag) {
+      if (mm != null) return mm;
+      if (Number.isFinite(flag)) return Math.max(0, flag);
+    }
+    if (Number.isFinite(fallbackValue)) return Math.max(0, fallbackValue);
+    return 0;
+  };
+  offsets.top = pick(trim.top, instance.trimTop);
+  offsets.right = pick(trim.right, instance.trimRight);
+  offsets.bottom = pick(trim.bottom, instance.trimBottom);
+  offsets.left = pick(trim.left, instance.trimLeft);
+  return offsets;
+}
+
+function createPlateStateLocal(instance, kerf) {
+  const offsets = computeTrimOffsetsLocal(instance);
+  const usableW = Math.max(0, instance.sw - offsets.left - offsets.right);
+  const usableH = Math.max(0, instance.sh - offsets.top - offsets.bottom);
+
+  return {
+    instance,
+    kerf,
+    usableW,
+    usableH,
+    offX: offsets.left,
+    offY: offsets.top
+  };
+}
+
+function getOrientationChoicesLocal(piece, allowAutoRotate) {
+  const orientations = [{
+    width: piece.rawW,
+    height: piece.rawH,
+    rotated: false
+  }];
+
+  if (allowAutoRotate && Math.abs(piece.rawW - piece.rawH) > PACKING_EPSILON) {
+    orientations.push({
+      width: piece.rawH,
+      height: piece.rawW,
+      rotated: true
+    });
   }
-  
-  return settings;
+
+  return orientations;
+}
+
+function hasUnplacedPiecesLocal(pool) {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].placed) return true;
+  }
+  return false;
+}
+
+function pickStripStarterLocal(state, pool, allowAutoRotate, remainingWidth) {
+  if (remainingWidth <= PACKING_EPSILON) return null;
+  let best = null;
+
+  for (let idx = 0; idx < pool.length && !forceStopSolver; idx++) {
+    const entry = pool[idx];
+    if (entry.placed) continue;
+    const orientations = getOrientationChoicesLocal(entry, allowAutoRotate);
+    for (const orientation of orientations) {
+      if (orientation.width > state.usableW + PACKING_EPSILON) continue;
+      if (orientation.height > state.usableH + PACKING_EPSILON) continue;
+      if (orientation.width > remainingWidth + PACKING_EPSILON) continue;
+      const gap = remainingWidth - orientation.width;
+      if (!best ||
+          gap < best.gap - PACKING_EPSILON ||
+          (Math.abs(gap - best.gap) <= PACKING_EPSILON && orientation.width > best.orientation.width + PACKING_EPSILON) ||
+          (Math.abs(gap - best.gap) <= PACKING_EPSILON && Math.abs(orientation.width - best.orientation.width) <= PACKING_EPSILON &&
+           orientation.height > best.orientation.height + PACKING_EPSILON)) {
+        best = {
+          index: idx,
+          orientation,
+          gap
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
+function pickPieceForStripLocal(pool, targetWidth, allowAutoRotate, maxHeight) {
+  if (maxHeight <= PACKING_EPSILON) return null;
+  let best = null;
+
+  for (let idx = 0; idx < pool.length && !forceStopSolver; idx++) {
+    const entry = pool[idx];
+    if (entry.placed) continue;
+    const orientations = getOrientationChoicesLocal(entry, allowAutoRotate);
+    for (const orientation of orientations) {
+      if (Math.abs(orientation.width - targetWidth) > PACKING_EPSILON) continue;
+      if (orientation.height > maxHeight + PACKING_EPSILON) continue;
+      if (!best ||
+          orientation.height > best.orientation.height + PACKING_EPSILON ||
+          (Math.abs(orientation.height - best.orientation.height) <= PACKING_EPSILON && entry.area > best.entry.area + PACKING_EPSILON)) {
+        best = {
+          index: idx,
+          entry,
+          orientation
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
+function recordPlacementLocal(strip, y, entry, orientation, plateIdx, placements, placementsByPlate, bestOrder, metrics) {
+  const placement = {
+    id: entry.id,
+    piece: entry.source,
+    plateIdx,
+    x: strip.x,
+    y,
+    w: orientation.width,
+    h: orientation.height,
+    usedW: orientation.width,
+    usedH: orientation.height,
+    rawW: orientation.width,
+    rawH: orientation.height,
+    rot: orientation.rotated ? !entry.rot : !!entry.rot,
+    color: entry.color,
+    rowIdx: entry.rowIdx
+  };
+
+  placements.push(placement);
+  placementsByPlate[plateIdx].push(placement);
+  bestOrder.push(entry.id);
+
+  entry.placed = true;
+  entry.finalRotated = orientation.rotated;
+  metrics.usedArea += orientation.width * orientation.height;
+}
+
+function fillStripWithPiecesLocal(state, strip, pool, allowAutoRotate, kerf, plateIdx, placements, placementsByPlate, bestOrder, metrics) {
+  while (!forceStopSolver) {
+    const remainingHeight = state.offY + state.usableH - strip.nextY;
+    const effectiveMax = remainingHeight - kerf;
+    if (effectiveMax <= PACKING_EPSILON) break;
+
+    const candidate = pickPieceForStripLocal(pool, strip.width, allowAutoRotate, effectiveMax);
+    if (!candidate) break;
+
+    strip.nextY += kerf;
+    const y = strip.nextY;
+    recordPlacementLocal(strip, y, candidate.entry, candidate.orientation, plateIdx, placements, placementsByPlate, bestOrder, metrics);
+    strip.nextY = y + candidate.orientation.height;
+  }
+}
+
+function solveWithGuillotineLocal(instances, pieces, options = {}) {
+  if (!Array.isArray(instances) || !instances.length) return null;
+
+  const allowAutoRotate = !!options.allowAutoRotate;
+  const kerf = Number.isFinite(options.kerf) ? options.kerf : 0;
+
+  const states = instances.map(inst => createPlateStateLocal(inst, kerf));
+  const pool = pieces.map(piece => ({
+    id: piece.id,
+    rowIdx: piece.rowIdx,
+    rawW: piece.rawW,
+    rawH: piece.rawH,
+    color: piece.color,
+    rot: piece.rot,
+    area: piece.rawW * piece.rawH,
+    dimKey: piece.dimKey,
+    source: piece,
+    placed: false
+  }));
+
+  const placements = [];
+  const placementsByPlate = states.map(() => []);
+  const bestOrder = [];
+  const metrics = { usedArea: 0 };
+
+  for (let plateIdx = 0; plateIdx < states.length && !forceStopSolver; plateIdx++) {
+    if (!hasUnplacedPiecesLocal(pool)) break;
+    const state = states[plateIdx];
+    if (state.usableW <= PACKING_EPSILON || state.usableH <= PACKING_EPSILON) continue;
+
+    let xCursor = state.offX;
+    let strips = 0;
+
+    while (!forceStopSolver && hasUnplacedPiecesLocal(pool)) {
+      let remainingWidth = state.offX + state.usableW - xCursor;
+      if (strips > 0) {
+        remainingWidth -= kerf;
+        if (remainingWidth <= PACKING_EPSILON) break;
+      }
+
+      const starter = pickStripStarterLocal(state, pool, allowAutoRotate, remainingWidth);
+      if (!starter) break;
+
+      if (strips > 0) {
+        xCursor += kerf;
+      }
+
+      if (xCursor + starter.orientation.width > state.offX + state.usableW + PACKING_EPSILON) {
+        if (strips > 0) {
+          xCursor -= kerf;
+        }
+        break;
+      }
+
+      const strip = {
+        width: starter.orientation.width,
+        x: xCursor,
+        nextY: state.offY
+      };
+
+      const entry = pool[starter.index];
+      const firstY = strip.nextY;
+      recordPlacementLocal(strip, firstY, entry, starter.orientation, plateIdx, placements, placementsByPlate, bestOrder, metrics);
+      strip.nextY = firstY + starter.orientation.height;
+
+      fillStripWithPiecesLocal(state, strip, pool, allowAutoRotate, kerf, plateIdx, placements, placementsByPlate, bestOrder, metrics);
+
+      xCursor += strip.width;
+      strips += 1;
+    }
+  }
+
+  const leftovers = pool
+    .filter(entry => !entry.placed)
+    .map(entry => ({
+      id: entry.id,
+      rowIdx: entry.rowIdx,
+      rawW: entry.rawW,
+      rawH: entry.rawH,
+      color: entry.color,
+      rot: entry.rot,
+      area: entry.rawW * entry.rawH,
+      dimKey: entry.dimKey
+    }));
+
+  const totalArea = instances.reduce((acc, inst) => acc + (inst.sw * inst.sh), 0);
+  const usedArea = metrics.usedArea;
+  const wasteArea = Math.max(0, totalArea - usedArea);
+  const penalty = leftovers.length > 0 ? totalArea * leftovers.length * 100 : 0;
+
+  return {
+    placements,
+    placementsByPlate,
+    leftovers,
+    usedArea,
+    wasteArea,
+    totalArea,
+    bestOrder,
+    score: wasteArea + penalty,
+    iterationsUsed: 0,
+    acceptedMoves: 0,
+    baseScore: wasteArea
+  };
 }
 
 function dimensionKeyNormalized(wVal, hVal) {
@@ -1842,312 +2210,6 @@ function reducePlateUsageIfPossible({ instances, instanceMeta, plateRows, initia
   };
 }
 
-function cleanupFreeRectsList(rects, eps = PACKING_EPSILON) {
-  const pruned = [];
-  for (let i = 0; i < rects.length; i++) {
-    const a = rects[i];
-    let contained = false;
-    for (let j = 0; j < rects.length; j++) {
-      if (i === j) continue;
-      const b = rects[j];
-      if (a.x >= b.x - eps && a.y >= b.y - eps &&
-          a.x + a.w <= b.x + b.w + eps &&
-          a.y + a.h <= b.y + b.h + eps) {
-        contained = true;
-        break;
-      }
-    }
-    if (!contained) pruned.push(a);
-  }
-  return pruned;
-}
-
-function createPlateState(instance, kerf, allowAutoRotate) {
-  const trim = instance.trim || { mm: 0, top: false, right: false, bottom: false, left: false };
-  const trimValue = Math.max(0, trim.mm || 0);
-  const leftT = trim.left ? trimValue : 0;
-  const rightT = trim.right ? trimValue : 0;
-  const topT = trim.top ? trimValue : 0;
-  const bottomT = trim.bottom ? trimValue : 0;
-  const usableW = Math.max(0, instance.sw - leftT - rightT);
-  const usableH = Math.max(0, instance.sh - topT - bottomT);
-  return {
-    sw: instance.sw,
-    sh: instance.sh,
-    trim,
-    kerf,
-    allowAutoRotate,
-    offX: leftT,
-    offY: topT,
-    usableW,
-    usableH,
-    freeRects: usableW > 0 && usableH > 0 ? [{ x: 0, y: 0, w: usableW, h: usableH }] : [],
-    placements: []
-  };
-}
-
-function tryPlacePieceOnPlate(state, piece) {
-  if (!state.freeRects.length) return null;
-  const kerf = state.kerf;
-  const orientations = state.allowAutoRotate ? [
-    { rawW: piece.rawW, rawH: piece.rawH, rot: piece.rot },
-    { rawW: piece.rawH, rawH: piece.rawW, rot: !piece.rot }
-  ] : [{ rawW: piece.rawW, rawH: piece.rawH, rot: piece.rot }];
-
-  let best = null;
-  for (let rIdx = 0; rIdx < state.freeRects.length; rIdx++) {
-    const rect = state.freeRects[rIdx];
-    for (const orientation of orientations) {
-      const wf = orientation.rawW + kerf;
-      const hf = orientation.rawH + kerf;
-      if (!(wf > 0 && hf > 0)) continue;
-      if (wf > rect.w + PACKING_EPSILON || hf > rect.h + PACKING_EPSILON) continue;
-
-      const leftoverX = Math.max(0, rect.w - wf);
-      const leftoverY = Math.max(0, rect.h - hf);
-      const hSplit = [];
-      if (leftoverY > PACKING_EPSILON) hSplit.push({ x: rect.x, y: rect.y + hf, w: rect.w, h: leftoverY });
-      if (leftoverX > PACKING_EPSILON) hSplit.push({ x: rect.x + wf, y: rect.y, w: leftoverX, h: hf });
-      const vSplit = [];
-      if (leftoverX > PACKING_EPSILON) vSplit.push({ x: rect.x + wf, y: rect.y, w: leftoverX, h: rect.h });
-      if (leftoverY > PACKING_EPSILON) vSplit.push({ x: rect.x, y: rect.y + hf, w: wf, h: leftoverY });
-      const options = [
-        { rects: hSplit, waste: hSplit.reduce((acc, r) => acc + r.w * r.h, 0) },
-        { rects: vSplit, waste: vSplit.reduce((acc, r) => acc + r.w * r.h, 0) }
-      ];
-      if (!options[0].rects.length && !options[1].rects.length) options.push({ rects: [], waste: 0 });
-
-      for (const opt of options) {
-        const score = opt.waste;
-        if (!best ||
-            score < best.score - PACKING_EPSILON ||
-            (Math.abs(score - best.score) <= PACKING_EPSILON && (rect.y < best.rect.y - PACKING_EPSILON ||
-            (Math.abs(rect.y - best.rect.y) <= PACKING_EPSILON && rect.x < best.rect.x - PACKING_EPSILON)))) {
-          best = {
-            rectIdx: rIdx,
-            rect,
-            orientation: { ...orientation, wf, hf },
-            score,
-            rects: opt.rects
-          };
-        }
-      }
-    }
-  }
-
-  if (!best) return null;
-
-  const rect = state.freeRects.splice(best.rectIdx, 1)[0];
-  const leftoverRects = [];
-  for (const candidate of best.rects || []) {
-    if (candidate.w > PACKING_EPSILON && candidate.h > PACKING_EPSILON) leftoverRects.push(candidate);
-  }
-  if (leftoverRects.length) state.freeRects.push(...leftoverRects);
-  state.freeRects = cleanupFreeRectsList(state.freeRects, PACKING_EPSILON);
-
-  return {
-    x: rect.x + state.offX,
-    y: rect.y + state.offY,
-    w: best.orientation.wf,
-    h: best.orientation.hf,
-    rawW: best.orientation.rawW,
-    rawH: best.orientation.rawH,
-    rot: best.orientation.rot
-  };
-}
-
-function buildGreedyOrder(pieces) {
-  const groupsMap = new Map();
-  pieces.forEach((piece) => {
-    if (!groupsMap.has(piece.dimKey)) {
-      groupsMap.set(piece.dimKey, {
-        key: piece.dimKey,
-        area: piece.area,
-        maxSide: Math.max(piece.rawW, piece.rawH),
-        pieces: []
-      });
-    }
-    const group = groupsMap.get(piece.dimKey);
-    group.area = Math.max(group.area, piece.area);
-    group.maxSide = Math.max(group.maxSide, Math.max(piece.rawW, piece.rawH));
-    group.pieces.push(piece);
-  });
-
-  const groups = Array.from(groupsMap.values());
-  groups.sort((a, b) => {
-    if (b.area !== a.area) return b.area - a.area;
-    if (b.maxSide !== a.maxSide) return b.maxSide - a.maxSide;
-    return a.key.localeCompare(b.key);
-  });
-
-  groups.forEach((group) => {
-    group.pieces.sort((a, b) => {
-      if (b.area !== a.area) return b.area - a.area;
-      return a.order - b.order;
-    });
-  });
-
-  const ordered = [];
-  groups.forEach((group) => ordered.push(...group.pieces));
-  return ordered;
-}
-
-function generateSeedOrders(pieces, metaSettings) {
-  if (!pieces.length) return [[]];
-  const seeds = [];
-  const seen = new Set();
-  const register = (order) => {
-    if (!order.length) return;
-    const key = order.map((p) => p.id).join('|');
-    if (seen.has(key)) return;
-    seen.add(key);
-    seeds.push(order.slice());
-  };
-
-  const base = buildGreedyOrder(pieces);
-  register(base);
-  register(base.slice().reverse());
-
-  const byLongestSide = pieces.slice().sort((a, b) => {
-    const aMax = Math.max(a.rawW, a.rawH);
-    const bMax = Math.max(b.rawW, b.rawH);
-    if (bMax !== aMax) return bMax - aMax;
-    return (b.area || 0) - (a.area || 0);
-  });
-  register(byLongestSide);
-
-  const bySkew = pieces.slice().sort((a, b) => {
-    const aSkew = Math.abs((a.rawW || 0) - (a.rawH || 0));
-    const bSkew = Math.abs((b.rawW || 0) - (b.rawH || 0));
-    if (bSkew !== aSkew) return bSkew - aSkew;
-    return (b.area || 0) - (a.area || 0);
-  });
-  register(bySkew);
-
-  const byRowGroup = pieces.slice().sort((a, b) => {
-    if (a.rowIdx !== b.rowIdx) return a.rowIdx - b.rowIdx;
-    if (b.area !== a.area) return b.area - a.area;
-    return a.order - b.order;
-  });
-  register(byRowGroup);
-
-  const randomSamples = Math.max(0, metaSettings.seedOrderSamples || 0);
-  for (let i = 0; i < randomSamples; i++) {
-    const shuffled = pieces.slice().sort(() => Math.random() - 0.5);
-    register(shuffled);
-  }
-
-  return seeds.length ? seeds : [pieces.slice()];
-}
-
-function perturbOrder(order, intensity) {
-  if (order.length <= 1) return order.slice();
-  const clone = order.slice();
-  const ops = Math.max(1, Math.round(clone.length * intensity));
-  for (let i = 0; i < ops; i++) {
-    const choice = Math.random();
-    if (choice < 0.34) {
-      const a = Math.floor(Math.random() * clone.length);
-      let b = Math.floor(Math.random() * clone.length);
-      if (clone.length > 1 && b === a) b = (b + 1) % clone.length;
-      const tmp = clone[a];
-      clone[a] = clone[b];
-      clone[b] = tmp;
-    } else if (choice < 0.67) {
-      const start = Math.floor(Math.random() * clone.length);
-      const span = Math.max(1, Math.round(intensity * Math.random() * clone.length * 0.5));
-      const end = Math.min(clone.length, start + span);
-      const segment = clone.splice(start, end - start);
-      let insertAt = Math.floor(Math.random() * (clone.length + 1));
-      clone.splice(insertAt, 0, ...segment);
-    } else {
-      const start = Math.floor(Math.random() * clone.length);
-      const span = Math.max(2, Math.round(intensity * Math.random() * clone.length * 0.6));
-      const end = Math.min(clone.length, start + span);
-      const segment = clone.slice(start, end).reverse();
-      clone.splice(start, segment.length, ...segment);
-    }
-  }
-  return clone;
-}
-
-function runGreedyGuillotine(instances, order, options, metaSettings) {
-  // Verificar si se debe detener el solver
-  if (forceStopSolver) {
-    return { 
-      placements: [], 
-      placementsByPlate: instances.map(() => []), 
-      leftovers: order, 
-      usedArea: 0, 
-      wasteArea: 0, 
-      totalArea: 0, 
-      score: Infinity 
-    };
-  }
-  
-  const states = instances.map((inst) => createPlateState(inst, options.kerf, options.allowAutoRotate));
-  const remaining = order.slice();
-  const placements = [];
-  const placementsByPlate = states.map(() => []);
-
-  for (let plateIdx = 0; plateIdx < states.length && remaining.length; plateIdx++) {
-    // Verificar cancelación en cada iteración
-    if (forceStopSolver) break;
-    
-    const state = states[plateIdx];
-    let progress = true;
-    while (progress && remaining.length) {
-      // Verificar cancelación en loops internos
-      if (forceStopSolver) break;
-      
-      progress = false;
-      for (let i = 0; i < remaining.length; i++) {
-        const piece = remaining[i];
-        const placement = tryPlacePieceOnPlate(state, piece);
-        if (!placement) continue;
-
-        const placementWithMeta = {
-          plateIdx,
-          x: placement.x,
-          y: placement.y,
-          w: placement.w,
-          h: placement.h,
-          rawW: placement.rawW,
-          rawH: placement.rawH,
-          rot: placement.rot,
-          color: piece.color,
-          rowIdx: piece.rowIdx,
-          id: piece.id
-        };
-
-        placements.push(placementWithMeta);
-        placementsByPlate[plateIdx].push(placementWithMeta);
-        remaining.splice(i, 1);
-        progress = true;
-        i--;
-      }
-    }
-  }
-
-  const leftovers = remaining.slice();
-  const usedArea = placements.reduce((acc, r) => acc + r.w * r.h, 0);
-  const totalArea = instances.reduce((acc, inst) => acc + inst.sw * inst.sh, 0);
-  const wasteArea = Math.max(0, totalArea - usedArea);
-  const missingArea = leftovers.reduce((acc, piece) => acc + piece.rawW * piece.rawH, 0);
-  const missingCountPenalty = totalArea * metaSettings.missingPiecePenaltyFactor * leftovers.length;
-  const score = wasteArea + missingArea * metaSettings.missingAreaWeight + missingCountPenalty;
-
-  return {
-    placements,
-    placementsByPlate,
-    leftovers,
-    usedArea,
-    wasteArea,
-    totalArea,
-    score
-  };
-}
-
 function groupLeftoverPieces(leftovers) {
   const groupsMap = new Map();
   leftovers.forEach((piece) => {
@@ -2171,139 +2233,6 @@ function groupLeftoverPieces(leftovers) {
     if (b.maxSide !== a.maxSide) return b.maxSide - a.maxSide;
     return a.key.localeCompare(b.key);
   });
-}
-
-function solveWithMetaHeuristics(instances, pieces, options) {
-  const metaSettings = getAdaptiveMetaSettings(pieces.length);
-  if (!pieces.length) {
-    const emptySolution = runGreedyGuillotine(instances, [], options, metaSettings);
-    return {
-      ...emptySolution,
-      bestOrder: [],
-      iterationsUsed: 0,
-      acceptedMoves: 0,
-      baseScore: emptySolution.score
-    };
-  }
-
-  const seedOrders = generateSeedOrders(pieces, metaSettings);
-
-  const evaluateOrder = (order) => runGreedyGuillotine(instances, order, options, metaSettings);
-
-  const annealFromOrder = (seedOrder, passIdx) => {
-    const startOrder = seedOrder.slice();
-    const baseSolution = evaluateOrder(startOrder);
-    let bestSolution = baseSolution;
-    let bestOrder = startOrder.slice();
-    let currentSolution = baseSolution;
-    let currentOrder = startOrder.slice();
-    let temperature = metaSettings.temperatureStart;
-    let acceptedMoves = 0;
-
-    const iterationMultiplier = 1 + Math.min(3, (passIdx || 0) * 0.35);
-    const dynamicMaxIterations = Math.max(metaSettings.maxIterations, Math.ceil(metaSettings.maxIterations * iterationMultiplier));
-    const iterations = Math.max(
-      metaSettings.minIterations,
-      Math.min(dynamicMaxIterations, Math.ceil(startOrder.length * metaSettings.perPieceFactor * iterationMultiplier))
-    );
-
-    for (let iter = 0; iter < iterations; iter++) {
-      const intensity = metaSettings.minPerturbation + Math.random() * (metaSettings.maxPerturbation - metaSettings.minPerturbation);
-      const candidateOrder = perturbOrder(currentOrder, intensity);
-      const candidateSolution = evaluateOrder(candidateOrder);
-      const delta = candidateSolution.score - currentSolution.score;
-      const effectiveTemp = Math.max(metaSettings.temperatureMin, temperature);
-      if (delta < 0 || Math.random() < Math.exp(-delta / effectiveTemp)) {
-        currentOrder = candidateOrder;
-        currentSolution = candidateSolution;
-        acceptedMoves++;
-        if (candidateSolution.score < bestSolution.score - PACKING_EPSILON) {
-          bestSolution = candidateSolution;
-          bestOrder = candidateOrder.slice();
-        }
-      }
-      temperature = Math.max(metaSettings.temperatureMin, temperature * metaSettings.temperatureCool);
-    }
-
-    const restartsBase = Math.max(1, Math.min(metaSettings.randomRestarts, Math.floor(startOrder.length / 4) || 1));
-    const restarts = Math.max(restartsBase, Math.ceil(restartsBase * iterationMultiplier));
-    for (let r = 0; r < restarts; r++) {
-      const randomIntensity = 0.45 + Math.random() * 0.45;
-      const randomOrder = perturbOrder(bestOrder, randomIntensity);
-      const candidate = evaluateOrder(randomOrder);
-      if (candidate.score < bestSolution.score - PACKING_EPSILON) {
-        bestSolution = candidate;
-        bestOrder = randomOrder.slice();
-      }
-    }
-
-    return {
-      bestSolution,
-      bestOrder,
-      baseSolution,
-      iterationsUsed: iterations,
-      acceptedMoves
-    };
-  };
-
-  let globalBest = null;
-  let globalBestOrder = [];
-  let totalIterations = 0;
-  let totalAccepted = 0;
-  let lowestBaseScore = Infinity;
-
-  const loopsByPieces = Math.ceil(pieces.length * (metaSettings.globalLoopsFactor || 0));
-  const baseLoops = Math.max(seedOrders.length, loopsByPieces, 1);
-  const maxLoops = Math.max(baseLoops, metaSettings.maxGlobalLoops || baseLoops);
-
-  let loopIdx = 0;
-  while (loopIdx < maxLoops) {
-    const seed = seedOrders[loopIdx % seedOrders.length];
-    let warmedSeed;
-    if (loopIdx < seedOrders.length) {
-      warmedSeed = seed.slice();
-    } else if (globalBestOrder.length) {
-      const drift = 0.3 + Math.random() * 0.5;
-      warmedSeed = perturbOrder(globalBestOrder, drift);
-    } else {
-      warmedSeed = perturbOrder(seed, 0.35 + Math.random() * 0.55);
-    }
-
-    if (loopIdx % 7 === 6) {
-      const randomSeed = pieces.slice().sort(() => Math.random() - 0.5);
-      warmedSeed = randomSeed;
-    }
-
-    const result = annealFromOrder(warmedSeed, loopIdx);
-    totalIterations += result.iterationsUsed;
-    totalAccepted += result.acceptedMoves;
-    lowestBaseScore = Math.min(lowestBaseScore, result.baseSolution.score);
-    if (!globalBest || result.bestSolution.score < globalBest.score - PACKING_EPSILON) {
-      globalBest = result.bestSolution;
-      globalBestOrder = result.bestOrder.slice();
-    }
-
-    if (globalBest && globalBest.leftovers.length === 0) {
-      break;
-    }
-
-    loopIdx += 1;
-  }
-
-  if (!globalBest) {
-    const fallback = evaluateOrder(seedOrders[0]);
-    globalBest = fallback;
-    globalBestOrder = seedOrders[0].slice();
-    lowestBaseScore = Math.min(lowestBaseScore, fallback.score);
-  }
-
-  return {
-    ...globalBest,
-    bestOrder: globalBestOrder,
-    iterationsUsed: totalIterations,
-    acceptedMoves: totalAccepted,
-    baseScore: lowestBaseScore
-  };
 }
 
 async function solveCutLayoutInternal() {
@@ -2341,7 +2270,8 @@ async function solveCutLayoutInternal() {
   // Usar worker si está disponible, sino fallback al método original
   try {
     if (solverWorker && solverWorker.worker) {
-      const result = await solverWorker.solve(inputs);
+      const workerPayload = buildWorkerPayload(inputs);
+      const result = await solverWorker.solve(workerPayload);
       if (result) {
         lastSuccessfulSolution = result;
         solverCache.set(cacheKey, result);
@@ -2380,39 +2310,35 @@ function solveCutLayoutInternalUncached(inputs) {
   if (!inputs) return null;
 
   let { instances, instanceMeta, plateRows, pieces, totalRequested, allowAutoRotate, kerf } = inputs;
-  const computeLeftoverArea = (leftovers) => leftovers.reduce((acc, p) => acc + (p.rawW * p.rawH), 0);
   const clonePieces = (src) => src.map(piece => ({ ...piece }));
   const runSolverWithFallback = (instSubset, pieceSource) => {
     let workingPieces = clonePieces(pieceSource);
-    let sol = solveWithMetaHeuristics(instSubset, workingPieces, { allowAutoRotate, kerf });
-    if (allowAutoRotate && sol.leftovers.length) {
-      const leftoverIds = new Set(sol.leftovers.map((p) => p.id));
-      if (leftoverIds.size) {
-        const flippedPieces = workingPieces.map((piece) => {
-          if (!leftoverIds.has(piece.id)) return { ...piece };
-          const rawW = piece.rawH;
-          const rawH = piece.rawW;
-          return {
-            ...piece,
-            rawW,
-            rawH,
-            rot: !piece.rot,
-            area: rawW * rawH,
-            dimKey: dimensionKeyNormalized(rawW, rawH)
-          };
-        });
-        const retry = solveWithMetaHeuristics(instSubset, flippedPieces, { allowAutoRotate, kerf });
-        const retryLeftoverArea = computeLeftoverArea(retry.leftovers);
-        const currentLeftoverArea = computeLeftoverArea(sol.leftovers);
-        const isBetter =
-          retry.leftovers.length < sol.leftovers.length ||
-          (retry.leftovers.length === sol.leftovers.length && retryLeftoverArea < currentLeftoverArea);
-        if (isBetter) {
-          workingPieces = flippedPieces;
-          sol = retry;
-        }
-      }
+    const options = {
+      allowAutoRotate,
+      kerf: Number.isFinite(kerf) ? kerf : 0
+    };
+
+    let sol = solveWithGuillotineLocal(instSubset, workingPieces, options);
+
+    if (!sol) {
+      return {
+        solution: {
+          placements: [],
+          placementsByPlate: instSubset.map(() => []),
+          leftovers: workingPieces.slice(),
+          usedArea: 0,
+          wasteArea: 0,
+          totalArea: instSubset.reduce((acc, inst) => acc + (inst.sw * inst.sh), 0),
+          bestOrder: [],
+          score: Infinity,
+          iterationsUsed: 0,
+          acceptedMoves: 0,
+          baseScore: Infinity
+        },
+        pieces: workingPieces
+      };
     }
+
     return { solution: sol, pieces: workingPieces };
   };
 
@@ -2442,16 +2368,8 @@ function solveCutLayoutInternalUncached(inputs) {
         if (areaA !== areaB) return areaB - areaA;
         return String(a.id).localeCompare(String(b.id));
       });
-      const prioritized = runSolverWithFallback(instances, prioritizedPiecesSource);
-      if (!prioritized.solution.leftovers.length) {
-        const prioritizedMaxIdx = getMaxUsedPlateIdx(prioritized.solution.placementsByPlate);
-        const betterByPlate = prioritizedMaxIdx < maxPlateIdx;
-        const betterByScore = prioritized.solution.score + PACKING_EPSILON < solution.score;
-        if (betterByPlate || betterByScore) {
-          solution = prioritized.solution;
-          solverPieces = prioritized.pieces;
-        }
-      }
+      // Para cortes guillotina, una reorganización que priorice placas posteriores
+      // no cambiará el ancho de las tiras; se mantiene la solución actual.
     }
   }
 
@@ -2485,9 +2403,9 @@ function solveCutLayoutInternalUncached(inputs) {
     pieces: solverPieces,
     meta: {
       bestScore: solution.score,
-      baseScore: solution.baseScore,
-      iterations: solution.iterationsUsed,
-      acceptedMoves: solution.acceptedMoves
+      baseScore: solution.baseScore != null ? solution.baseScore : (solution.score != null ? solution.score : 0),
+      iterations: solution.iterationsUsed || 0,
+      acceptedMoves: solution.acceptedMoves || 0
     }
   };
 }
@@ -3252,6 +3170,14 @@ clearAllBtn.addEventListener('click', () => {
   rowsEl.appendChild(makeRow(currentRowCount()));
   reindexRows();
   applyPlatesGate();
+  
+  // Resetear optimización avanzada y cache
+  showingAdvancedOptimization = false;
+  lastOptimizationHash = null;
+  lastOptimizationResult = null;
+  if (sheetCanvasEl) {
+    sheetCanvasEl.innerHTML = '';
+  }
 });
 
 // Crear filas iniciales si no hay (cuando no hay proyecto guardado)
@@ -3586,409 +3512,6 @@ function saveJSON() {
   const fname = name ? `proyecto-${name.replace(/\s+/g,'_')}.json` : 'proyecto-cortes.json';
   download(fname, url);
   URL.revokeObjectURL(url);
-}
-
-// ============ GENERACIÓN DE ARCHIVOS CNC ============
-
-function generateCNCFiles() {
-  const solution = lastSuccessfulSolution || solveCutLayoutInternal();
-  if (!solution || !solution.instances || solution.instances.length === 0) {
-    alert('No hay placas optimizadas para generar archivos CNC');
-    return;
-  }
-
-  console.log('🔧 Generando archivos CNC para', solution.instances.length, 'placas');
-  
-  // Generar archivo para cada placa
-  solution.instances.forEach((instance, plateIndex) => {
-    const placements = solution.placementsByPlate[plateIndex] || [];
-    
-    if (placements.length === 0) {
-      console.log(`⚠️ Placa ${plateIndex + 1} sin piezas, omitiendo...`);
-      return;
-    }
-
-    const cncData = generateCNCForPlate(instance, placements, plateIndex);
-    const extension = String(plateIndex + 1).padStart(3, '0');
-    const projectName = (projectNameEl?.value || '').trim();
-    const filename = projectName ? 
-      `${projectName.replace(/\s+/g, '_')}.${extension}` : 
-      `placa_${plateIndex + 1}.${extension}`;
-    
-    downloadCNCFile(cncData, filename);
-    console.log(`✅ Generado: ${filename}`);
-  });
-  
-  alert(`Se generaron ${solution.instances.length} archivos CNC`);
-}
-
-function generateCNCForPlate(instance, placements, plateIndex) {
-  const plateW = instance.sw;
-  const plateH = instance.sh;
-  const kerf = parseInt(kerfInput?.value || '3', 10);
-  const materialName = currentMaterialName || 'MDF';
-  
-  console.log(`🔧 Generando CNC para placa ${plateIndex + 1}:`, {
-    dimensiones: `${plateW}x${plateH}`,
-    piezas: placements.length,
-    material: materialName
-  });
-
-  // Función para formatear valores CNC (parte entera de 5 caracteres)
-  function formatCNCValue(value) {
-    const fixed = value.toFixed(6);
-    const [integerPart, decimalPart] = fixed.split('.');
-    const paddedInteger = integerPart.padStart(5, ' ');
-    return `${paddedInteger}.${decimalPart}`;
-  }
-  
-  // Generar header
-  let content = `[Intestazione]\n`;
-  content += `Descrizione=${materialName.toLowerCase()}\n`;
-  content += `Lunghezza= ${plateW.toFixed(6)}\n`;
-  content += `Larghezza= ${plateH.toFixed(6)}\n`;
-  content += `Spessore=   18.000000\n`;
-  content += `AltPacco=   67.000000\n`;
-  content += `VelRotaz=3000\n`;
-  content += `VelAvanz=30.000000\n\n\n`;
-
-  // Generar secuencia de cortes
-  // Obtener valor de refilado de la primera placa (aplica para X e Y)
-  const firstPlate = getPlates()[0];
-  const initialTrim = firstPlate?.trim?.mm || 13; // Valor por defecto si no hay placas
-  
-  const cutData = generateCutSequence(placements, plateW, plateH, kerf, initialTrim);
-  
-  content += `[Righe]\n`;
-  content += `NumeroRighe=${cutData.cuts.length}\n`;
-  cutData.cuts.forEach((cut, i) => {
-    // Formatear el valor para que la parte entera ocupe 5 caracteres
-    const formattedValue = formatCNCValue(cut.value);
-    content += `${i + 1}=${cut.type},${formattedValue},1,0.000000,0.000000,0.000000,0.000000\n`;
-  });
-  content += `\n`;
-
-  // Generar datos de piezas
-  content += `[Dati]\n`;
-  content += `NumeroDati=${cutData.pieces.length}\n`;
-  cutData.pieces.forEach((piece, i) => {
-    const edges = piece.edges || ['', '', '', '']; // Array de 4 elementos
-    
-    // El tercer parámetro debe ser el número de cortes (piece.quantity)
-    content += `${i + 1}=,,${piece.quantity},${materialName.toLowerCase()} ,,2     ,${piece.w.toFixed(2)},${piece.h.toFixed(2)},18.00,,1,${piece.quantity}`;
-    
-    // Agregar los 4 valores de cubre canto en orden: superior, inferior, izquierdo, derecho
-    content += `,${edges[0] || ''},${edges[1] || ''},${edges[2] || ''},${edges[3] || ''},,`;
-    content += `\n`;
-  });
-  content += `\n`;
-
-  // Generar referencias
-  content += `[Riferimenti]\n`;
-  cutData.cuts.forEach((cut, i) => {
-    content += `${i + 1}=${cut.reference || ''}\n`;
-  });
-
-  return content;
-}
-
-function generateCutSequence(placements, plateW, plateH, kerf, initialTrim = 13) {
-  console.log('🔧 Generando secuencia de cortes para', placements.length, 'piezas');
-  console.log('🔧 Usando refilado inicial:', initialTrim, 'mm');
-  
-  const cuts = [];
-  const pieces = [];
-  const pieceMap = new Map();
-  let pieceCounter = 1;
-
-  // Usar el valor de refilado ingresado por el usuario (aplica para X e Y)
-  const initialTrimY = initialTrim;
-  const initialTrimX = initialTrim;
-
-  // Agrupar piezas por dimensiones y propiedades
-  placements.forEach(placement => {
-    // Usar dimensiones originales restando el kerf si es necesario
-    const w = placement.originalW || (placement.w - kerf);
-    const h = placement.originalH || (placement.h - kerf);
-    const rot = placement.rot ? 1 : 0;
-    const edgeInfo = getEdgesForPiece(placement);
-    const edges = edgeInfo.values.join(','); // Unir con comas para el key
-    const key = `${w}x${h}_rot${rot}_${edges}`;
-    
-    if (!pieceMap.has(key)) {
-      pieceMap.set(key, {
-        id: pieceCounter++,
-        w: w,
-        h: h,
-        quantity: 1,
-        rotation: rot,
-        edges: edgeInfo.values, // Usar el array de valores
-        positions: [{ x: placement.x, y: placement.y }]
-      });
-    } else {
-      pieceMap.get(key).quantity++;
-      pieceMap.get(key).positions.push({ x: placement.x, y: placement.y });
-    }
-  });
-
-  // Convertir mapa a array de piezas
-  Array.from(pieceMap.values()).forEach(piece => {
-    pieces.push(piece);
-  });
-
-  // Generar secuencia de cortes estilo guillotina
-  // Refilado inicial Y (independiente del kerf)
-  cuts.push({ type: 'RY', value: initialTrimY, reference: '' });
-
-  // Después del refilado, cortar hasta el final de la primera franja
-  // Usar altura original sin kerf
-  const firstRowPlacements = placements.filter(p => p.y < 50);
-  const firstRowHeight = Math.max(...firstRowPlacements.map(p => p.originalH || (p.h - kerf)));
-  cuts.push({ type: 'Y', value: firstRowHeight, reference: '' });
-
-  // Crear grupos de cortes por filas
-  const rowGroups = createRowGroups(placements);
-  
-  rowGroups.forEach((rowPlacements, rowIndex) => {
-    // Usar altura original sin kerf
-    const rowHeight = Math.max(...rowPlacements.map(p => p.originalH || (p.h - kerf)));
-    
-    // Para filas posteriores a la primera: moverse a la nueva posición Y
-    if (rowIndex > 0) {
-      // Calcular cuánto moverse desde la posición actual
-      const currentY = getCurrentY(cuts);
-      const targetY = currentY + rowHeight; // Moverse una altura de fila
-      cuts.push({ type: 'Y', value: rowHeight, reference: '' });
-    }
-
-    // Ordenar piezas en la fila por posición X
-    const sortedRow = [...rowPlacements].sort((a, b) => a.x - b.x);
-    
-    // Refilado X una sola vez por franja/fila
-    cuts.push({ type: 'RX', value: initialTrimX, reference: '' });
-    
-    sortedRow.forEach((placement, pieceInRowIndex) => {
-      const realHeight = placement.originalH || (placement.h - kerf);
-      
-      // Corte X para separar la pieza (usar dimensión original sin kerf)
-      const pieceData = findPieceForPlacement(pieces, placement);
-      const pieceRef = pieceData ? `(${pieceData.id})` : '';
-      const realWidth = placement.originalW || (placement.w - kerf);
-      
-      cuts.push({ type: 'X', value: realWidth, reference: pieceRef });
-      
-      // Verificar si necesitamos U* (fin de bloque)
-      // Esto ocurre cuando la pieza actual tiene altura de fila Y la siguiente tiene altura diferente
-      const isCurrentHeightSameAsRow = realHeight === rowHeight;
-      const hasNextPiece = pieceInRowIndex < sortedRow.length - 1;
-      
-      if (isCurrentHeightSameAsRow && hasNextPiece) {
-        const nextPlacement = sortedRow[pieceInRowIndex + 1];
-        const nextHeight = nextPlacement.originalH || (nextPlacement.h - kerf);
-        const isNextHeightDifferent = nextHeight !== rowHeight;
-        
-        if (isNextHeightDifferent) {
-          cuts.push({ type: 'U*', value: 0, reference: '' });
-        }
-      }
-      
-      // Para piezas con altura diferente a la fila: cambio de zona U
-      if (realHeight !== rowHeight) {
-        cuts.push({ type: 'U', value: realHeight, reference: '' });
-      }
-    });
-    
-    // No hacer corte Y aquí - se hará al inicio de la siguiente fila si es necesario
-    
-    // Descargar todas las piezas de la fila
-    sortedRow.forEach(p => {
-      const pData = findPieceForPlacement(pieces, p);
-      if (pData) {
-        const realHeight = p.originalH || (p.h - kerf);
-        cuts.push({ type: 'U', value: realHeight, reference: '' });
-      }
-    });
-  });
-
-  console.log('✅ Secuencia generada:', cuts.length, 'cortes para', pieces.length, 'tipos de piezas');
-  
-  return { cuts, pieces };
-}
-
-function createRowGroups(placements) {
-  // Agrupar piezas por filas (misma posición Y aproximada)
-  const tolerance = 5; // mm de tolerancia para considerar misma fila
-  const rows = [];
-  
-  const sortedByY = [...placements].sort((a, b) => a.y - b.y);
-  
-  sortedByY.forEach(placement => {
-    // Buscar fila existente
-    let foundRow = rows.find(row => 
-      Math.abs(row[0].y - placement.y) <= tolerance
-    );
-    
-    if (foundRow) {
-      foundRow.push(placement);
-    } else {
-      rows.push([placement]);
-    }
-  });
-  
-  return rows;
-}
-
-function getCurrentY(cuts) {
-  // Calcular posición Y actual basada en cortes previos
-  let currentY = 0;
-  cuts.forEach(cut => {
-    if (cut.type === 'Y') {
-      currentY += cut.value;
-    }
-  });
-  return currentY;
-}
-
-function findPieceForPlacement(pieces, placement) {
-  // Encontrar la pieza correspondiente a un placement
-  const w = placement.w;
-  const h = placement.h;
-  const rot = placement.rot ? 1 : 0;
-  const edges = getEdgesForPlacement(placement);
-  
-  return pieces.find(piece => 
-    piece.w === w && 
-    piece.h === h && 
-    piece.rotation === rot &&
-    piece.edges === edges
-  );
-}
-
-function getEdgesForPiece(placement) {
-  // Obtener información de cantos desde la fila original
-  try {
-    const rows = getRows();
-    const row = rows[placement.rowIdx];
-    if (!row) return { legacy: '    ', values: ['', '', '', ''] };
-    
-    return getEdgesFromRow(row);
-  } catch (error) {
-    console.warn('Error obteniendo cantos:', error);
-    return { legacy: '    ', values: ['', '', '', ''] }; // [top, bottom, left, right]
-  }
-}
-
-function getEdgesForPlacement(placement) {
-  return getEdgesForPiece(placement);
-}
-
-function getEdgesFromRow(row) {
-  // Extraer información de cantos seleccionados en la row
-  const edgeElements = row.querySelectorAll('line.edge[data-selected="1"]');
-  
-  // Usar el mismo método que se usa en otras partes del código
-  const widthEdgeSelect = row._edgeSelects?.width || row.querySelector('select[data-role="width-edge"]');
-  const heightEdgeSelect = row._edgeSelects?.height || row.querySelector('select[data-role="height-edge"]');
-  
-  // Obtener valores seleccionados de los selectores
-  const horizontalEdgeValue = widthEdgeSelect?.value || '';
-  const verticalEdgeValue = heightEdgeSelect?.value || '';
-  
-  // Debug: Investigar la estructura de los elementos edge
-  console.log('🔍 DEBUG getEdgesFromRow:', {
-    edgeElements: edgeElements.length,
-    horizontalEdgeValue,
-    verticalEdgeValue
-  });
-  
-  // Crear array para los 4 lados en el orden correcto: [top, bottom, left, right]
-  const edgeValues = ['', '', '', ''];
-  
-  // Investigar todos los elementos edge disponibles, no solo los seleccionados
-  const allEdges = row.querySelectorAll('line.edge');
-  console.log('🔍 DEBUG todos los edges:', allEdges.length);
-  
-  allEdges.forEach((edge, index) => {
-    const isSelected = edge.dataset.selected === '1';
-    const side = edge.dataset.side;
-    const classList = Array.from(edge.classList);
-    
-    console.log(`🔍 DEBUG edge ${index}:`, {
-      isSelected,
-      side,
-      classList,
-      attributes: Array.from(edge.attributes).map(attr => `${attr.name}="${attr.value}"`)
-    });
-    
-    if (isSelected) {
-      // Intentar determinar el lado por el índice o clase
-      if (index === 0 || classList.includes('top')) {
-        edgeValues[0] = horizontalEdgeValue; // top
-      } else if (index === 1 || classList.includes('right')) {
-        edgeValues[3] = verticalEdgeValue; // right
-      } else if (index === 2 || classList.includes('bottom')) {
-        edgeValues[1] = horizontalEdgeValue; // bottom
-      } else if (index === 3 || classList.includes('left')) {
-        edgeValues[2] = verticalEdgeValue; // left
-      }
-    }
-  });
-  
-  console.log('🔍 DEBUG resultado edgeValues:', edgeValues);
-  
-  return {
-    legacy: edgeElements.length > 0 ? 'X' : ' ', // Para compatibilidad
-    values: edgeValues // [top, bottom, left, right]
-  };
-}
-
-function downloadCNCFile(content, filename) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-// Agregar botón CNC a la interfaz
-function addCNCExportButton() {
-  // Buscar el contenedor de botones de exportación
-  const exportSection = document.querySelector('.export-section') || 
-                       document.querySelector('.btn-group') ||
-                       exportPdfBtn?.parentElement;
-  
-  if (!exportSection) {
-    console.warn('No se encontró sección de exportación para agregar botón CNC');
-    return;
-  }
-  
-  // Verificar si ya existe el botón
-  if (document.querySelector('#cncExportBtn')) return;
-  
-  const cncBtn = document.createElement('button');
-  cncBtn.id = 'cncExportBtn';
-  cncBtn.className = exportPdfBtn ? exportPdfBtn.className : 'btn btn-secondary';
-  cncBtn.innerHTML = '🔧 Generar CNC';
-  cncBtn.title = 'Generar archivos CNC (.001, .002, etc.) para máquina de corte';
-  cncBtn.style.marginLeft = '5px';
-  cncBtn.onclick = generateCNCFiles;
-  
-  exportSection.appendChild(cncBtn);
-  console.log('✅ Botón CNC agregado a la interfaz');
-  
-  // Inicializar el estado del botón
-  const isReady = isSheetComplete();
-  if (isReady) {
-    cncBtn.disabled = false;
-    cncBtn.classList.remove('disabled-btn');
-  } else {
-    cncBtn.disabled = true;
-    cncBtn.classList.add('disabled-btn');
-  }
 }
 
 function cloneSvgForExport(svgEl) {
@@ -4434,13 +3957,6 @@ function loadState(state) {
   }
   
   persistState();
-  
-  // Actualizar estado de botones después de cargar
-  setTimeout(() => {
-    const isReady = isSheetComplete();
-    toggleActionButtons(isReady);
-    console.log('🔧 Botones actualizados después de cargar estado:', isReady);
-  }, 200);
 }
 
 // ✅ NUEVAS FUNCIONES AUXILIARES PARA SOLUCIONES GUARDADAS
@@ -4682,6 +4198,358 @@ function collectPiecesFromState(state) {
   return pieces;
 }
 
+/**
+ * Renderiza con el optimizador avanzado (se ejecuta automáticamente)
+ */
+async function renderWithAdvancedOptimizer() {
+  try {
+    // Obtener las piezas actuales
+    const pieces = gatherPiecesFromRows();
+    
+    if (!pieces || pieces.length === 0) {
+      // Si no hay piezas, mostrar mensaje
+      if (sheetCanvasEl) {
+        sheetCanvasEl.innerHTML = '';
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = 'Agregá piezas para ver el plano optimizado';
+        sheetCanvasEl.appendChild(hint);
+      }
+      return;
+    }
+    
+    // Obtener especificaciones de la placa
+    const plateRows = getPlates();
+    if (!plateRows || plateRows.length === 0) {
+      if (sheetCanvasEl) {
+        sheetCanvasEl.innerHTML = '';
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = 'Configurá una placa para ver el plano optimizado';
+        sheetCanvasEl.appendChild(hint);
+      }
+      return;
+    }
+    
+    const firstPlate = plateRows[0];
+    const plateWidth = firstPlate.sw || 2750;
+    const plateHeight = firstPlate.sh || 1830;
+    const trimMm = firstPlate.trim?.mm || 0;
+    const trimLeft = firstPlate.trim?.left ? trimMm : 0;
+    const trimTop = firstPlate.trim?.top ? trimMm : 0;
+    const trimRight = firstPlate.trim?.right ? trimMm : 0;
+    const trimBottom = firstPlate.trim?.bottom ? trimMm : 0;
+    
+    const plateSpec = {
+      width: plateWidth,
+      height: plateHeight
+    };
+    
+    // Opciones de optimización
+    const kerf = getKerfMm();
+    const options = {
+      algorithm: 'simulated-annealing',
+      iterations: 500,
+      kerf: kerf,
+      trimLeft: trimLeft,
+      trimTop: trimTop,
+      trimRight: trimRight,
+      trimBottom: trimBottom,
+      allowRotation: autoRotateToggle ? autoRotateToggle.checked : true
+    };
+    
+    // Calcular hash de los datos para detectar cambios
+    const dataHash = JSON.stringify({
+      pieces: pieces.map(p => ({ w: p.width, h: p.height, id: p.id })),
+      plate: { w: plateWidth, h: plateHeight },
+      options: { kerf, trimLeft, trimTop, trimRight, trimBottom, rot: options.allowRotation }
+    });
+    
+    // Si los datos no han cambiado y ya tenemos una solución, reutilizarla
+    if (lastOptimizationHash === dataHash && lastOptimizationResult) {
+      console.log('✅ Reutilizando optimización anterior (sin cambios en datos)');
+      const { optimizeCutLayout, generateReport } = await import('./advanced-optimizer.js');
+      const report = generateReport(lastOptimizationResult);
+      updateSummaryWithAdvancedReport(report);
+      renderAdvancedSolution(lastOptimizationResult, plateSpec);
+      return;
+    }
+    
+    // Los datos cambiaron, ejecutar nueva optimización
+    console.log('🔄 Ejecutando nueva optimización (datos modificados)');
+    const { optimizeCutLayout, generateReport } = await import('./advanced-optimizer.js');
+    const result = optimizeCutLayout(pieces, plateSpec, options);
+    const report = generateReport(result);
+    
+    // Guardar en cache
+    lastOptimizationHash = dataHash;
+    lastOptimizationResult = result;
+    
+    // Actualizar resumen con datos del optimizador avanzado
+    updateSummaryWithAdvancedReport(report);
+    
+    // Renderizar visualización
+    renderAdvancedSolution(result, plateSpec);
+    
+  } catch (error) {
+    console.error('Error en renderWithAdvancedOptimizer:', error);
+    
+    // Fallback: mostrar mensaje de error
+    if (sheetCanvasEl) {
+      sheetCanvasEl.innerHTML = '';
+      const errorDiv = document.createElement('div');
+      errorDiv.style.cssText = 'background:#fee;color:#c00;padding:12px;border-radius:6px;';
+      errorDiv.textContent = '⚠️ Error al optimizar: ' + error.message;
+      sheetCanvasEl.appendChild(errorDiv);
+    }
+  }
+}
+
+/**
+ * Recopila piezas desde las filas actuales (para optimizador)
+ */
+function gatherPiecesFromRows() {
+  const state = serializeState();
+  const pieces = collectPiecesFromState(state);
+  
+  // Convertir al formato esperado por el optimizador
+  return pieces.map(p => ({
+    id: p.id,
+    width: p.rawW,
+    height: p.rawH,
+    color: p.color,
+    label: `${p.rawW}×${p.rawH}`,
+    quantity: 1,
+    rowIndex: p.rowIdx
+  }));
+}
+
+/**
+ * Renderiza visualmente la solución del optimizador avanzado
+ */
+function renderAdvancedSolution(optimizationResult, plateSpec) {
+  if (!sheetCanvasEl) return;
+  
+  // Activar flag para prevenir que renderSheetOverview sobrescriba
+  showingAdvancedOptimization = true;
+  
+  // IMPORTANTE: Limpiar completamente el canvas
+  sheetCanvasEl.innerHTML = '';
+  
+  const { plates, remaining } = optimizationResult;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  
+  const holder = document.createElement('div');
+  holder.className = 'sheet-multi';
+  
+  plates.forEach((plate, plateIdx) => {
+    const placedPieces = plate.getPlacedPiecesWithCoords();
+    
+    const VIEW_W = 1000;
+    const LABEL_EXTRA_H = 24;
+    const PAD_X = 16;
+    const PAD_BOTTOM = 16;
+    const PAD_TOP = PAD_BOTTOM + LABEL_EXTRA_H;
+    const innerW = VIEW_W - PAD_X * 2;
+    const scale = plateSpec.width > 0 ? innerW / plateSpec.width : 0;
+    const contentH = plateSpec.height * scale;
+    const baseViewH = Math.round(contentH + PAD_TOP + PAD_BOTTOM);
+    const noticeExtra = remaining.length ? 20 : 0;
+    const VIEW_H = Math.max(1, baseViewH + noticeExtra);
+    
+    const wrap = document.createElement('div');
+    
+    // Título de la placa
+    const title = document.createElement('div');
+    title.className = 'plate-title';
+    const titleText = document.createElement('span');
+    titleText.textContent = `Placa ${plateIdx + 1} de ${plates.length} · ${plate.utilization.toFixed(2)}% utilización`;
+    title.appendChild(titleText);
+    wrap.appendChild(title);
+    
+    // SVG de la placa
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${VIEW_W} ${VIEW_H}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.dataset.plateWidthMm = String(plateSpec.width);
+    svg.dataset.plateHeightMm = String(plateSpec.height);
+    svg.dataset.scale = String(scale);
+    
+    // Rectángulo de la placa
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('class', 'sheet-outline');
+    rect.setAttribute('x', String(PAD_X));
+    rect.setAttribute('y', String(PAD_TOP));
+    rect.setAttribute('width', String(innerW));
+    rect.setAttribute('height', String(contentH));
+    rect.setAttribute('rx', '6');
+    svg.appendChild(rect);
+    
+    // Label de dimensiones
+    const label = document.createElementNS(svgNS, 'text');
+    label.setAttribute('class', 'sheet-dims');
+    label.setAttribute('x', String(VIEW_W / 2));
+    label.setAttribute('y', String(PAD_TOP - LABEL_EXTRA_H + 20));
+    label.setAttribute('text-anchor', 'middle');
+    label.textContent = `${plateSpec.width} × ${plateSpec.height} mm`;
+    svg.appendChild(label);
+    
+    const ox = PAD_X;
+    const oy = PAD_TOP;
+    
+    // Dibujar áreas de trim
+    const trimLeft = plate.trimLeft || 0;
+    const trimTop = plate.trimTop || 0;
+    
+    if (trimLeft > 0) {
+      const trimRect = document.createElementNS(svgNS, 'rect');
+      trimRect.setAttribute('class', 'trim-band');
+      trimRect.setAttribute('x', String(ox));
+      trimRect.setAttribute('y', String(oy));
+      trimRect.setAttribute('width', String(trimLeft * scale));
+      trimRect.setAttribute('height', String(contentH));
+      trimRect.setAttribute('fill', '#f59e0b33');
+      svg.appendChild(trimRect);
+    }
+    
+    if (trimTop > 0) {
+      const trimRect = document.createElementNS(svgNS, 'rect');
+      trimRect.setAttribute('class', 'trim-band');
+      trimRect.setAttribute('x', String(ox));
+      trimRect.setAttribute('y', String(oy));
+      trimRect.setAttribute('width', String(innerW));
+      trimRect.setAttribute('height', String(trimTop * scale));
+      trimRect.setAttribute('fill', '#f59e0b33');
+      svg.appendChild(trimRect);
+    }
+    
+    // Dibujar piezas
+    placedPieces.forEach((p, idx) => {
+      const pxX = ox + p.x * scale;
+      const pxY = oy + p.y * scale;
+      const pxW = Math.max(1, p.width * scale);
+      const pxH = Math.max(1, p.height * scale);
+      
+      // Rectángulo exterior (borde)
+      const outer = document.createElementNS(svgNS, 'rect');
+      outer.setAttribute('class', 'piece-rect');
+      outer.setAttribute('x', String(pxX));
+      outer.setAttribute('y', String(pxY));
+      outer.setAttribute('width', String(pxW));
+      outer.setAttribute('height', String(pxH));
+      outer.setAttribute('rx', '3');
+      outer.setAttribute('fill', '#ef444428');
+      outer.setAttribute('stroke', p.piece.color || '#ef4444');
+      outer.setAttribute('stroke-width', '2');
+      svg.appendChild(outer);
+      
+      // Rectángulo interior (relleno)
+      const inner = document.createElementNS(svgNS, 'rect');
+      inner.setAttribute('class', 'piece-inner');
+      inner.setAttribute('x', String(pxX + 2));
+      inner.setAttribute('y', String(pxY + 2));
+      inner.setAttribute('width', String(Math.max(1, pxW - 4)));
+      inner.setAttribute('height', String(Math.max(1, pxH - 4)));
+      inner.setAttribute('rx', '2');
+      inner.setAttribute('fill', p.piece.color || '#ef4444');
+      inner.setAttribute('fill-opacity', '0.35');
+      svg.appendChild(inner);
+      
+      // Labels de dimensiones
+      if (pxW >= 40 && pxH >= 28) {
+        const fontSize = Math.max(8, Math.min(pxW, pxH) * 0.12);
+        
+        // Label de ancho
+        const widthLabel = document.createElementNS(svgNS, 'text');
+        widthLabel.setAttribute('class', 'piece-label');
+        widthLabel.setAttribute('text-anchor', 'middle');
+        widthLabel.setAttribute('x', String(pxX + pxW / 2));
+        widthLabel.setAttribute('y', String(pxY + pxH - 8));
+        widthLabel.setAttribute('font-size', String(fontSize));
+        widthLabel.setAttribute('fill', '#fff');
+        widthLabel.textContent = `${p.width.toFixed(0)}`;
+        svg.appendChild(widthLabel);
+        
+        // Label de alto (ROTADO VERTICALMENTE)
+        const heightLabel = document.createElementNS(svgNS, 'text');
+        heightLabel.setAttribute('class', 'piece-label');
+        heightLabel.setAttribute('text-anchor', 'middle');
+        heightLabel.setAttribute('x', String(pxX + pxW - 8));
+        heightLabel.setAttribute('y', String(pxY + pxH / 2));
+        heightLabel.setAttribute('font-size', String(fontSize));
+        heightLabel.setAttribute('fill', '#fff');
+        heightLabel.setAttribute('transform', `rotate(-90 ${pxX + pxW - 8} ${pxY + pxH / 2})`);
+        heightLabel.textContent = `${p.height.toFixed(0)}`;
+        svg.appendChild(heightLabel);
+        
+        // Indicador de rotación
+        if (p.piece.rotated) {
+          const rotLabel = document.createElementNS(svgNS, 'text');
+          rotLabel.setAttribute('class', 'piece-label');
+          rotLabel.setAttribute('text-anchor', 'start');
+          rotLabel.setAttribute('x', String(pxX + 8));
+          rotLabel.setAttribute('y', String(pxY + 16));
+          rotLabel.setAttribute('font-size', String(fontSize));
+          rotLabel.setAttribute('fill', '#fbbf24');
+          rotLabel.setAttribute('font-weight', 'bold');
+          rotLabel.textContent = '↻';
+          svg.appendChild(rotLabel);
+        }
+      }
+    });
+    
+    // Líneas de corte guillotina
+    const cuts = plate.getCutSequence();
+    
+    // Cortes verticales
+    cuts.vertical.forEach(cut => {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('class', 'cut-line');
+      line.setAttribute('x1', String(ox + cut.position * scale));
+      line.setAttribute('y1', String(oy));
+      line.setAttribute('x2', String(ox + cut.position * scale));
+      line.setAttribute('y2', String(oy + contentH));
+      line.setAttribute('stroke', '#10b981');
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-dasharray', '5,5');
+      line.setAttribute('opacity', '0.5');
+      svg.appendChild(line);
+    });
+    
+    // Cortes horizontales
+    cuts.horizontal.forEach(cut => {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('class', 'cut-line');
+      line.setAttribute('x1', String(ox + cut.x * scale));
+      line.setAttribute('y1', String(oy + cut.position * scale));
+      line.setAttribute('x2', String(ox + (cut.x + cut.width) * scale));
+      line.setAttribute('y2', String(oy + cut.position * scale));
+      line.setAttribute('stroke', '#3b82f6');
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-dasharray', '5,5');
+      line.setAttribute('opacity', '0.5');
+      svg.appendChild(line);
+    });
+    
+    wrap.appendChild(svg);
+    holder.appendChild(wrap);
+  });
+  
+  sheetCanvasEl.appendChild(holder);
+  
+  // Mensaje de piezas sin colocar
+  if (remaining.length > 0) {
+    const notice = document.createElement('div');
+    notice.className = 'leftover-notice';
+    notice.style.cssText = 'background:#fef3c7;color:#92400e;padding:12px;margin:16px 0;border-radius:6px;';
+    notice.textContent = `⚠️ ${remaining.length} pieza${remaining.length > 1 ? 's' : ''} no colocada${remaining.length > 1 ? 's' : ''}`;
+    sheetCanvasEl.appendChild(notice);
+  }
+  
+  console.log('✅ Visualización renderizada con', plates.length, 'placa(s)');
+}
+
+
 function loadJSON() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -4773,21 +4641,143 @@ async function buildExportCanvasForPdf() {
     const trimmed = (text || '').trim();
     if (trimmed) summaryTexts.push(trimmed);
   };
-  addSummary(currentMaterialName ? `Material: ${currentMaterialName}` : '');
-  addSummary(summaryPiecesEl?.textContent);
-  addSummary(summaryPlatesEl?.textContent);
-  addSummary(summaryPlateCostEl?.textContent);
-  addSummary(summaryReqEl?.textContent);
-  addSummary(summaryPlacedEl?.textContent);
-  addSummary(summaryLeftEl?.textContent);
-  addSummary(summaryAreaEl?.textContent);
-  addSummary(summaryWasteEl?.textContent);
-  addSummary(summaryUtilEl?.textContent);
-  addSummary(summaryTotalEl?.textContent);
+  
+  // Agregar material si existe
+  if (currentMaterialName) {
+    addSummary(`Material: ${currentMaterialName}`);
+    addSummary('');
+  }
+  
+  // Extraer información de las tarjetas de placas en summaryListEl
+  if (summaryListEl && summaryListEl.children) {
+    const plateCards = [];
+    for (let i = 0; i < summaryListEl.children.length; i++) {
+      const child = summaryListEl.children[i];
+      // Buscar por el fondo oscuro (puede estar como rgb(14, 22, 41) o #0e1629)
+      if (child.style.background && (
+        child.style.background.includes('rgb(14, 22, 41)') || 
+        child.style.background.includes('#0e1629') ||
+        child.style.background.includes('0e1629')
+      )) {
+        plateCards.push(child);
+      }
+    }
+    
+    if (plateCards.length > 0) {
+      addSummary('DETALLE DE PLACAS:');
+      plateCards.forEach((card) => {
+        addSummary('');
+        // Extraer todo el texto de la tarjeta y procesarlo línea por línea
+        const fullText = card.textContent || '';
+        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        
+        lines.forEach((line) => {
+          // Limpiar emojis pero mantener estructura
+          const cleaned = line
+            .replace(/📋|📐|📦|📊|♻️|✅|🔪|💰|💵/g, '')
+            .trim();
+          if (cleaned) {
+            // Si es el título (contiene "Placa"), no indentar
+            if (cleaned.startsWith('Placa')) {
+              addSummary(cleaned);
+            } else {
+              addSummary(`  ${cleaned}`);
+            }
+          }
+        });
+      });
+      addSummary('');
+    }
+  }
+  
+  // Extraer información de costos de placas
+  if (summaryPlatesValueEl && summaryPlatesValueEl.textContent.trim()) {
+    addSummary('COSTO DE PLACAS:');
+    const platesCostText = summaryPlatesValueEl.textContent || '';
+    const lines = platesCostText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    lines.forEach((line) => {
+      const cleaned = line.replace(/💰/g, '').trim();
+      if (cleaned && !cleaned.startsWith('Costo de Placas')) {
+        addSummary(`  ${cleaned}`);
+      }
+    });
+    addSummary('');
+  }
+  
+  // Extraer información de costos de cubre canto
+  if (summaryTotalEl && summaryTotalEl.textContent.trim()) {
+    addSummary('COSTO DE CUBRE CANTO:');
+    const edgeCostText = summaryTotalEl.textContent || '';
+    const lines = edgeCostText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    lines.forEach((line) => {
+      const cleaned = line.replace(/💰/g, '').trim();
+      if (cleaned && !cleaned.startsWith('Costo de Cubre Canto')) {
+        addSummary(`  ${cleaned}`);
+      }
+    });
+    addSummary('');
+  }
+  
+  // Extraer total general
+  if (summaryGrandTotalEl && summaryGrandTotalEl.textContent.trim()) {
+    const grandTotalText = summaryGrandTotalEl.textContent || '';
+    const cleaned = grandTotalText.replace(/💵/g, '').trim();
+    if (cleaned) {
+      addSummary(cleaned);
+    }
+  }
+  
+  // Agregar información de piezas sin colocar si existe
+  const remainingCard = summaryListEl?.querySelector('div[style*="background:#7f1d1d"]');
+  if (remainingCard) {
+    const remainingText = remainingCard.textContent?.trim();
+    if (remainingText) {
+      addSummary(remainingText.replace(/⚠️/g, '!').trim());
+      addSummary('');
+    }
+  }
+  
+  // Agregar costo de placas si existe
+  if (summaryPlatesValueEl && summaryPlatesValueEl.innerHTML) {
+    addSummary('COSTO DE PLACAS:');
+    const platesCostText = summaryPlatesValueEl.textContent?.trim();
+    if (platesCostText) {
+      const lines = platesCostText.split('\n').filter(l => l.trim());
+      lines.slice(1).forEach(line => { // Skip title
+        const cleaned = line.replace(/💰|•/g, '').trim();
+        if (cleaned) addSummary(`  ${cleaned}`);
+      });
+      addSummary('');
+    }
+  }
+  
+  // Agregar costo de cubre canto si existe
+  if (summaryTotalEl && summaryTotalEl.innerHTML) {
+    addSummary('COSTO DE CUBRE CANTO:');
+    const edgeText = summaryTotalEl.textContent?.trim();
+    if (edgeText) {
+      const lines = edgeText.split('\n').filter(l => l.trim());
+      lines.slice(1).forEach(line => { // Skip title
+        const cleaned = line.replace(/💰|•/g, '').trim();
+        if (cleaned) addSummary(`  ${cleaned}`);
+      });
+      addSummary('');
+    }
+  }
+  
+  // Agregar total general si existe
+  if (summaryGrandTotalEl && summaryGrandTotalEl.innerHTML) {
+    const totalText = summaryGrandTotalEl.textContent?.trim();
+    if (totalText) {
+      const lines = totalText.split('\n').filter(l => l.trim());
+      lines.forEach(line => {
+        const cleaned = line.replace(/💵|💰/g, '').trim();
+        if (cleaned) addSummary(cleaned);
+      });
+    }
+  }
 
-  const rowSummaries = Array.from(summaryListEl?.querySelectorAll('li span:last-child') || [])
-    .map((span) => span.textContent?.trim())
-    .filter(Boolean);
+  const rowSummaries = [];
 
   const summaryLineHeight = 20;
   const headingHeight = 20;
@@ -4797,10 +4787,7 @@ async function buildExportCanvasForPdf() {
   const leftBottom = summaryTexts.length
     ? summaryStartY + headingHeight + contentGap + summaryTexts.length * summaryLineHeight
     : summaryStartY + headingHeight;
-  const rightBottom = rowSummaries.length
-    ? summaryStartY + headingHeight + contentGap + rowSummaries.length * summaryLineHeight
-    : summaryStartY + headingHeight;
-  const summaryBlockBottom = Math.max(leftBottom, rightBottom);
+  const summaryBlockBottom = leftBottom;
   const headerH = Math.max(120, summaryBlockBottom + margin);
 
   const totalH = headerH + margin + scaled.reduce((acc, s) => acc + s.h + margin, 0);
@@ -4816,22 +4803,16 @@ async function buildExportCanvasForPdf() {
   const title = projectName || 'Plano de cortes';
   ctx.fillText(title, margin, 34);
 
-  const columnWidth = (targetW - margin * 2 - columnGap) / 2;
   const leftX = margin;
-  const rightX = margin + columnWidth + columnGap;
   const headingYOffset = summaryStartY;
   const bodyStartY = headingYOffset + headingHeight + contentGap;
 
   ctx.font = 'bold 16px system-ui';
-  ctx.fillText('Resumen', leftX, headingYOffset);
-  ctx.fillText('Filas', rightX, headingYOffset);
+  ctx.fillText('Detalle de Placas', leftX, headingYOffset);
 
-  ctx.font = '16px system-ui';
+  ctx.font = '14px system-ui';
   summaryTexts.forEach((line, idx) => {
     ctx.fillText(line, leftX, bodyStartY + idx * summaryLineHeight);
-  });
-  rowSummaries.forEach((line, idx) => {
-    ctx.fillText(line, rightX, bodyStartY + idx * summaryLineHeight);
   });
   let y = headerH;
   scaled.forEach(({ img, w, h }, idx) => {
@@ -5487,6 +5468,15 @@ if (resetAllBtn) {
     } else {
       currentMaterialName = DEFAULT_MATERIAL;
     }
+    
+    // Resetear optimización avanzada y cache
+    showingAdvancedOptimization = false;
+    lastOptimizationHash = null;
+    lastOptimizationResult = null;
+    if (sheetCanvasEl) {
+      sheetCanvasEl.innerHTML = '';
+    }
+    
     applyPlatesGate();
     toggleAddButton();
     resetSummaryUI();
@@ -5587,19 +5577,35 @@ function recalcEdgebanding() {
   });
   if (summaryTotalEl) {
     if (lines.length) {
-      summaryTotalEl.textContent = '';
+      summaryTotalEl.innerHTML = '';
+      
+      // Título de la sección (igual que Costo de Placas)
+      const titleDiv = document.createElement('div');
+      titleDiv.style.cssText = 'font-weight:600;margin-bottom:8px;color:#cbd5e1;';
+      titleDiv.textContent = '💰 Costo de Cubre Canto';
+      summaryTotalEl.appendChild(titleDiv);
+      
+      // Contenido con estilo similar
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'font-size:0.9em;color:#94a3b8;';
+      
       const totalLine = document.createElement('div');
+      totalLine.style.cssText = 'margin-bottom:4px;';
       const costLabel = showCosts ? ` — $${fmt(totalCost, 2)}` : '';
-      totalLine.textContent = `Cubre canto total: ${fmt(totalMeters, 3)} m${costLabel}`;
-      summaryTotalEl.appendChild(totalLine);
+      totalLine.textContent = `• Total: ${fmt(totalMeters, 3)} m${costLabel}`;
+      contentDiv.appendChild(totalLine);
+      
       lines.forEach(({ label, meters, cost }) => {
         const lineDiv = document.createElement('div');
+        lineDiv.style.cssText = 'margin-left:12px;font-size:0.95em;';
         const costText = showCosts && Number.isFinite(cost) ? ` — $${fmt(cost, 2)}` : '';
         lineDiv.textContent = `${label}: ${fmt(meters, 3)} m${costText}`;
-        summaryTotalEl.appendChild(lineDiv);
+        contentDiv.appendChild(lineDiv);
       });
+      
+      summaryTotalEl.appendChild(contentDiv);
     } else {
-      summaryTotalEl.textContent = '';
+      summaryTotalEl.innerHTML = '';
     }
   }
   lastEdgeCostSummary = {
@@ -5607,12 +5613,70 @@ function recalcEdgebanding() {
     totalCost: showCosts ? totalCost : 0,
     entries: lines.map(({ label, meters, cost }) => ({ label, meters, cost }))
   };
+  
+  // Actualizar secciones de costos
+  updateCostSummary();
+  
   // Actualizar lista combinada (con datos de colocación)
   updateRowSummaryUI();
 }
 
+/**
+ * Actualiza las secciones de costo de placas y total general
+ */
+function updateCostSummary() {
+  const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
+  
+  const plateCost = lastPlateCostSummary.total || 0;
+  const plateCount = lastPlateCostSummary.count || 0;
+  const plateUnit = lastPlateCostSummary.unit || 0;
+  
+  const edgeCost = lastEdgeCostSummary.totalCost || 0;
+  const edgeMeters = lastEdgeCostSummary.totalMeters || 0;
+  
+  // Actualizar sección de costo de placas
+  if (summaryPlatesValueEl) {
+    if (plateCost > 0 && plateCount > 0) {
+      summaryPlatesValueEl.innerHTML = `
+        <div style="font-weight:600;margin-bottom:4px;color:#cbd5e1;">💰 Costo de Placas</div>
+        <div style="font-size:0.9em;color:#94a3b8;">
+          <div>• Placas utilizadas: ${plateCount}</div>
+          <div>• Valor unitario: $${fmt(plateUnit, 2)}</div>
+          <div style="margin-top:4px;font-weight:600;color:#10b981;">Total placas: $${fmt(plateCost, 2)}</div>
+        </div>
+      `;
+      summaryPlatesValueEl.style.display = '';
+    } else {
+      summaryPlatesValueEl.style.display = 'none';
+    }
+  }
+  
+  // Actualizar total general
+  if (summaryGrandTotalEl) {
+    const grandTotal = plateCost + edgeCost;
+    if (grandTotal > 0) {
+      summaryGrandTotalEl.innerHTML = `
+        <div class="grand-total-label">💵 Total General</div>
+        <div class="grand-total-amount">$${fmt(grandTotal, 2)}</div>
+        <div style="font-size:0.85em;color:#fbbf24;opacity:0.85;margin-top:4px;">
+          Placas: $${fmt(plateCost, 2)} + Cubre canto: $${fmt(edgeCost, 2)}
+        </div>
+      `;
+      summaryGrandTotalEl.style.display = '';
+    } else {
+      summaryGrandTotalEl.style.display = 'none';
+    }
+  }
+}
+
 // Render de la placa completa al pie
 async function renderSheetOverview() {
+  // Si estamos mostrando la visualización del optimizador avanzado, no sobrescribir
+  if (showingAdvancedOptimization) {
+    console.log('⏸️ renderSheetOverview omitido (mostrando optimización avanzada)');
+    return;
+  }
+  
   if (!sheetCanvasEl) return;
   sheetCanvasEl.innerHTML = '';
   lastPlateCostSummary = { unit: 0, total: 0, count: 0, material: currentMaterialName || '' };
@@ -6093,11 +6157,6 @@ async function renderSheetOverview() {
   }
   updateRowSummaryUI();
   
-  // Actualizar estado de botones después de renderizar la solución
-  const isReady = isSheetComplete();
-  toggleActionButtons(isReady);
-  console.log('🔧 Botones actualizados después de renderizar solución:', isReady);
-  
   } catch (error) {
     console.error('Error en renderSheetOverview:', error);
     loadingManager.hideLoading('sheet-overview');
@@ -6280,24 +6339,81 @@ if (saveGaBtn && gaIdInput) {
   });
 }
 
-// ============ INICIALIZACIÓN CNC ============
-
-// Inicializar botón CNC cuando la página esté lista
-document.addEventListener('DOMContentLoaded', () => {
-  // Esperar un poco para que todos los elementos estén cargados
-  setTimeout(() => {
-    addCNCExportButton();
-  }, 2000); // Aumentar tiempo de espera
-  
-  // Intentar agregar el botón periódicamente hasta que aparezca
-  const interval = setInterval(() => {
-    if (!document.querySelector('#cncExportBtn')) {
-      addCNCExportButton();
-    } else {
-      clearInterval(interval);
+// ===== BOTÓN RECALCULAR OPTIMIZACIÓN =====
+if (generateLayoutBtn) {
+  generateLayoutBtn.addEventListener('click', async () => {
+    try {
+      console.log('🔄 Recalculando optimización...');
+      
+      // Simplemente forzar un recálculo
+      generateLayoutBtn.disabled = true;
+      generateLayoutBtn.textContent = '⏳ Optimizando...';
+      
+      await renderWithAdvancedOptimizer();
+      
+      console.log('✅ Optimización recalculada');
+      
+    } catch (error) {
+      console.error('❌ Error en optimización:', error);
+      alert('Error al recalcular: ' + error.message);
+    } finally {
+      generateLayoutBtn.disabled = false;
+      generateLayoutBtn.textContent = '🔄 Recalcular Optimización';
     }
-  }, 3000);
+  });
+}
+
+
+/**
+ * Aplica la solución optimizada a la interfaz
+ */
+async function applySolutionToUI(optimizationResult, plateSpec, options) {
+  // Aquí se conectará con solveCutLayoutInternal para actualizar la visualización
+  // Por ahora, forzar actualización manual
+  console.log('📍 Aplicando solución a UI...');
   
-  // Limpiar intervalo después de 30 segundos
-  setTimeout(() => clearInterval(interval), 30000);
-});
+  // Convertir formato de advanced-optimizer al formato esperado por renderSolution
+  const { plates, remaining } = optimizationResult;
+  
+  const instances = plates.map((plate, idx) => ({
+    id: `plate-${idx}`,
+    width: plateSpec.width,
+    height: plateSpec.height,
+    material: currentMaterialName || DEFAULT_MATERIAL
+  }));
+  
+  const placements = [];
+  const placementsByPlate = plates.map(plate => {
+    const piecesData = plate.getPlacedPiecesWithCoords();
+    return piecesData.map(pd => ({
+      piece: pd.piece,
+      x: pd.x,
+      y: pd.y,
+      width: pd.width,
+      height: pd.height,
+      rotated: pd.piece.rotated || false
+    }));
+  });
+  
+  placementsByPlate.forEach(platePlacements => {
+    placements.push(...platePlacements);
+  });
+  
+  const totalRequested = plates.reduce((sum, p) => sum + p.placedPieces.length, 0) + remaining.length;
+  const usedArea = plates.reduce((sum, p) => sum + p.usedArea, 0);
+  const totalArea = plates.reduce((sum, p) => sum + p.totalArea, 0);
+  
+  const solution = {
+    instances,
+    placementsByPlate,
+    placements,
+    totalRequested,
+    usedArea,
+    totalArea,
+    leftoverPieces: remaining,
+    pieces: placements.map(p => p.piece)
+  };
+  
+  renderSolution(solution);
+  console.log('✅ Solución aplicada a UI');
+}

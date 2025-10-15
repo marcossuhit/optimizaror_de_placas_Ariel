@@ -447,14 +447,51 @@ svg { width: 100%; height: 100%; }
 .summary-total {
   margin: 20px 0 8px;
   font-weight: 500;
+  color: #94a3b8;
+  display: grid;
+  gap: 6px;
+  background: #0e1629;
+  border: 1px solid #1e293b;
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.summary-plates-value {
+  margin: 20px 0 8px;
+  font-weight: 500;
+  color: #94a3b8;
+  display: grid;
+  gap: 6px;
+  background: #0e1629;
+  border: 1px solid #1e293b;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.summary-grand-total {
+  margin: 20px 0 8px;
+  font-weight: 700;
+  font-size: 1.1rem;
   color: #fbbf24;
   display: grid;
   gap: 6px;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.12));
+  border: 2px solid rgba(245, 158, 11, 0.4);
+  padding: 14px 16px;
   border-radius: 12px;
-  box-shadow: inset 0 0 12px rgba(217, 119, 6, 0.18);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(251, 191, 36, 0.25);
+}
+.summary-grand-total .grand-total-label {
+  font-size: 0.85rem;
+  color: #fbbf24;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.summary-grand-total .grand-total-amount {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #fcd34d;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 .summary-stat { margin: 2px 0 6px; color: rgba(226, 232, 240, 0.75); }
 .summary-list { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }

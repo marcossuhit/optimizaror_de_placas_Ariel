@@ -41,6 +41,7 @@
         </div>
         <div class="export-group">
           <button id="installBtn" class="btn" style="display:none">Instalar app</button>
+          <button id="generateLayoutBtn" class="btn" style="font-weight:bold;">🔄 Recalcular Optimización</button>
           <button id="saveJsonBtn" class="btn">Guardar</button>
           <button id="loadJsonBtn" class="btn">Cargar</button>
           <button id="exportPdfBtn" class="btn">Exportar PDF</button>
@@ -76,9 +77,9 @@
               Complete la(s) placa(s) para habilitar filas. Ingrese tipos de cortes. Cada fila muestra un rectángulo con bordes clicables para marcar selección.
             </p>
             <div class="rows-controls">
-              <button id="addRowBtn" class="btn primary">Agregar fila</button>
-              <button id="clearAllBtn" class="btn danger">Limpiar filas</button>
-              <button id="resetAllBtn" class="btn btn-soft">Limpiar entradas</button>
+              <button id="addRowBtn" class="btn primary" disabled>Agregar fila</button>
+              <button id="clearAllBtn" class="btn danger disabled-btn" disabled>Limpiar filas</button>
+              <button id="resetAllBtn" class="btn btn-soft disabled-btn" disabled>Limpiar entradas</button>
               <span id="addRowHint" class="hint-inline"></span>
               <label class="hint-inline" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;">
                 <input id="autoRotateToggle" type="checkbox" checked /> Rotación automática permitida
@@ -88,19 +89,22 @@
         </div>
 
         <aside class="summary" id="summaryPanel">
-          <h2 class="summary-title">Resumen</h2>
-          <div id="summaryPieces" class="summary-stat">Piezas colocadas: 0</div>
-          <div id="summaryPlates" class="summary-stat">Placas utilizadas: 0</div>
+          <h2 class="summary-title">Detalle de Placas</h2>
+          <div id="summaryPieces" class="summary-stat" style="display:none;">Piezas colocadas: 0</div>
+          <div id="summaryPlates" class="summary-stat" style="display:none;">Placas utilizadas: 0</div>
           <div id="summaryPlateCost" class="summary-stat" style="display:none;">Costo placas: $0</div>
-          <div id="summaryArea" class="summary-stat">Área utilizada: 0 m²</div>
-          <div id="summaryUtil" class="summary-stat">Aprovechamiento: 0%</div>
-          <div id="summaryWaste" class="summary-stat">Desperdicio: 0 m² (0%)</div>
-          <div id="summaryReq" class="summary-stat">Cortes pedidos: 0</div>
-          <div id="summaryPlaced" class="summary-stat">Colocados: 0</div>
-          <div id="summaryLeft" class="summary-stat">Fuera: 0</div>
-          <h3 class="summary-subtitle">Filas</h3>
+          <div id="summaryArea" class="summary-stat" style="display:none;">Área utilizada: 0 m²</div>
+          <div id="summaryUtil" class="summary-stat" style="display:none;">Aprovechamiento: 0%</div>
+          <div id="summaryWaste" class="summary-stat" style="display:none;">Desperdicio: 0 m² (0%)</div>
+          <div id="summaryReq" class="summary-stat" style="display:none;">Cortes pedidos: 0</div>
+          <div id="summaryPlaced" class="summary-stat" style="display:none;">Colocados: 0</div>
+          <div id="summaryLeft" class="summary-stat" style="display:none;">Fuera: 0</div>
+          <h3 class="summary-subtitle" style="display:none;">Filas</h3>
           <ul id="summaryList" class="summary-list"></ul>
+          
+          <div id="summaryPlatesValue" class="summary-plates-value"></div>
           <div id="summaryTotal" class="summary-total">Cantidad de cubre canto: 0 mm</div>
+          <div id="summaryGrandTotal" class="summary-grand-total"></div>
 
           <section class="social-connect" aria-labelledby="socialConnectTitle">
             <h3 id="socialConnectTitle" class="panel-title">Conectá con nuestras redes</h3>
@@ -170,6 +174,6 @@
     <script src="email-provider-config.js"></script>
     <script src="email-provider.js"></script>
     <script src="auth.js"></script>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
   </html>

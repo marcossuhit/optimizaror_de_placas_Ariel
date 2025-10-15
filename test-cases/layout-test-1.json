@@ -1,0 +1,38 @@
+{
+  "description": "Test case crítico: Todos los cortes deben caber en una sola placa con rotación óptima",
+  "plateConfig": {
+    "width": 2720,
+    "height": 1800,
+    "kerf": 5,
+    "trimTop": 13,
+    "trimLeft": 13,
+    "material": "MDF 18mm"
+  },
+  "pieces": [
+    { "width": 1500, "height": 450, "quantity": 4, "label": "Pieza 1500x450" },
+    { "width": 1500, "height": 100, "quantity": 1, "label": "Pieza 1500x300" },
+    { "width": 715, "height": 320, "quantity": 2, "label": "Pieza 715x320" },
+    { "width": 400, "height": 250, "quantity": 1, "label": "Pieza 400x250" },
+    { "width": 1400, "height": 400, "quantity": 1, "label": "Pieza 1400x400" },
+    { "width": 363, "height": 400, "quantity": 1, "label": "Pieza 363x400" },
+    { "width": 1500, "height": 300, "quantity": 1, "label": "Pieza 1500x300" },
+    { "width": 290, "height": 252, "quantity": 1, "label": "Pieza 290x252" }
+  ],
+  "expectedResult": {
+    "platesUsed": 1,
+    "allPiecesFit": true,
+    "notes": "Solución óptima requiere rotar una pieza 1500x450 para la columna izquierda, las piezas 715x320 y 1400x400 en vertical, y acomodar las nuevas piezas 1500x100, 363x400 y 292x252 en la franja inferior"
+  },
+  "optimalLayout": {
+    "description": "Layout sugerido que debe caber todo en una placa",
+    "instructions": [
+      "Rotar una pieza de 1500x450 para formar la columna izquierda junto a la pieza de 400x250 en la base",
+      "Apilar 3 piezas de 1500x450 en orientación horizontal en la zona central",
+      "Ubicar la pieza de 1500x300 debajo de las tiras de 1500x450 y rematar la franja con la pieza de 1500x100",
+      "Rotar las 2 piezas de 715x320 a 320x715 y apilarlas a la derecha de las tiras centrales",
+      "Colocar la pieza de 290x252 debajo de las piezas 320x715 para cerrar la columna",
+      "Rotar la pieza de 1400x400 a 400x1400 y ubicarla en la esquina superior derecha",
+      "Colocar la pieza de 363x400 debajo de la pieza de 1400x400 para completar la columna derecha"
+    ]
+  }
+}
