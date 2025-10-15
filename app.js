@@ -5055,47 +5055,22 @@ function buildSummaryReport() {
     summaryLines.forEach((line) => pushLine(`- ${line}`));
   }
 
-  if (summaryTotalEl) {
-    const childLines = Array.from(summaryTotalEl.children || [])
-      .map((node) => (node.textContent || '').trim())
-      .filter(Boolean);
-    const totalText = childLines.length ? childLines : [(summaryTotalEl.textContent || '').trim()];
-    const clean = totalText.filter(Boolean);
-    if (clean.length) {
-      lines.push('');
-      lines.push('Cubre canto:');
-      clean.forEach((line) => pushLine(`- ${line}`));
-    }
-  }
-
-  if (summaryListEl) {
-    const rowSummaries = Array.from(summaryListEl.querySelectorAll('li span:last-child') || [])
-      .map((span) => (span.textContent || '').trim())
-      .filter(Boolean);
-    if (rowSummaries.length) {
-      lines.push('');
-      lines.push('Resumen por filas:');
-      rowSummaries.forEach((line) => pushLine(`- ${line}`));
-    }
-  }
-
+  // Información de placas utilizadas (sin costos)
   if (lastPlateCostSummary.count > 0) {
     lines.push('');
-    lines.push('Costo de placas:');
+    lines.push('📦 Placas utilizadas:');
     const mat = lastPlateCostSummary.material ? lastPlateCostSummary.material : materialLabel;
-    pushLine(`- Material: ${mat || 'Sin material seleccionado'}`);
-    pushLine(`- Valor unitario: $${fmt(lastPlateCostSummary.unit, 2)}`);
-    pushLine(`- Placas utilizadas: ${lastPlateCostSummary.count}`);
-    pushLine(`- Total: $${fmt(lastPlateCostSummary.total, 2)}`);
+    pushLine(`- 📏 Material: ${mat || 'Sin material seleccionado'}`);
+    pushLine(`- 📋 Cantidad de placas: ${lastPlateCostSummary.count}`);
   }
 
+  // Información de cubre canto (solo metros, sin costos)
   if (lastEdgeCostSummary.totalMeters > 0 || (lastEdgeCostSummary.entries || []).length) {
     lines.push('');
-    lines.push('Costo cubre canto:');
-    pushLine(`- Total: ${fmt(lastEdgeCostSummary.totalMeters, 3)} m — $${fmt(lastEdgeCostSummary.totalCost, 2)}`);
-    (lastEdgeCostSummary.entries || []).forEach(({ label, meters, cost }) => {
-      const costText = Number.isFinite(cost) ? ` — $${fmt(cost, 2)}` : '';
-      pushLine(`- ${label}: ${fmt(meters, 3)} m${costText}`);
+    lines.push('📐 Cubre canto:');
+    pushLine(`- 📊 Total: ${fmt(lastEdgeCostSummary.totalMeters, 3)} m`);
+    (lastEdgeCostSummary.entries || []).forEach(({ label, meters }) => {
+      pushLine(`- 🎨 ${label}: ${fmt(meters, 3)} m`);
     });
   }
 
