@@ -5019,7 +5019,8 @@ function encodeMimeWord(str) {
   return `=?UTF-8?B?${base64}?=`;
 }
 
-function buildSummaryReport() {
+// Función para el reporte del ADMINISTRADOR (CON precios)
+function buildSummaryReportAdmin() {
   const lines = [];
   const pushLine = (text = '') => {
     if (text === null || text === undefined) return;
@@ -5055,7 +5056,69 @@ function buildSummaryReport() {
     summaryLines.forEach((line) => pushLine(`- ${line}`));
   }
 
-  // Información de placas utilizadas (sin costos)
+  // Información de placas CON PRECIOS (solo admin)
+  if (lastPlateCostSummary.count > 0) {
+    lines.push('');
+    lines.push('💵 Costo de placas:');
+    const mat = lastPlateCostSummary.material ? lastPlateCostSummary.material : materialLabel;
+    pushLine(`- 📏 Material: ${mat || 'Sin material seleccionado'}`);
+    pushLine(`- 💲 Valor unitario: $${fmt(lastPlateCostSummary.unit, 2)}`);
+    pushLine(`- 📦 Placas utilizadas: ${lastPlateCostSummary.count}`);
+    pushLine(`- 💰 Total placas: $${fmt(lastPlateCostSummary.total, 2)}`);
+  }
+
+  // Información de cubre canto CON PRECIOS (solo admin)
+  if (lastEdgeCostSummary.totalMeters > 0 || (lastEdgeCostSummary.entries || []).length) {
+    lines.push('');
+    lines.push('📐 Costo cubre canto:');
+    pushLine(`- 📊 Total: ${fmt(lastEdgeCostSummary.totalMeters, 3)} m — 💰 $${fmt(lastEdgeCostSummary.totalCost, 2)}`);
+    (lastEdgeCostSummary.entries || []).forEach(({ label, meters, cost }) => {
+      const costText = Number.isFinite(cost) ? ` — $${fmt(cost, 2)}` : '';
+      pushLine(`- 🎨 ${label}: ${fmt(meters, 3)} m${costText}`);
+    });
+  }
+
+  return buildSummaryReportCommon(lines, pushLine, fmt);
+}
+
+// Función para el reporte del CLIENTE (SIN precios)
+function buildSummaryReportClient() {
+  const lines = [];
+  const pushLine = (text = '') => {
+    if (text === null || text === undefined) return;
+    const normalized = String(text).trim();
+    lines.push(normalized);
+  };
+  const fmt = (n, decimals = 2) => formatNumber(Number(n) || 0, decimals);
+
+  const projectName = (projectNameEl?.value || '').trim() || 'Sin nombre';
+  pushLine(`Proyecto: ${projectName}`);
+  const materialLabel = (currentMaterialName || '').trim() || 'Sin material seleccionado';
+  pushLine(`Material: ${materialLabel}`);
+
+  const summaryElements = [
+    summaryPiecesEl,
+    summaryPlatesEl,
+    summaryPlateCostEl,
+    summaryAreaEl,
+    summaryUtilEl,
+    summaryWasteEl,
+    summaryReqEl,
+    summaryPlacedEl,
+    summaryLeftEl
+  ];
+
+  const summaryLines = summaryElements
+    .map((el) => (el?.textContent || '').trim())
+    .filter(Boolean);
+
+  if (summaryLines.length) {
+    lines.push('');
+    lines.push('Resumen general:');
+    summaryLines.forEach((line) => pushLine(`- ${line}`));
+  }
+
+  // Información de placas SIN PRECIOS (cliente)
   if (lastPlateCostSummary.count > 0) {
     lines.push('');
     lines.push('📦 Placas utilizadas:');
@@ -5064,7 +5127,7 @@ function buildSummaryReport() {
     pushLine(`- 📋 Cantidad de placas: ${lastPlateCostSummary.count}`);
   }
 
-  // Información de cubre canto (solo metros, sin costos)
+  // Información de cubre canto SIN PRECIOS (cliente)
   if (lastEdgeCostSummary.totalMeters > 0 || (lastEdgeCostSummary.entries || []).length) {
     lines.push('');
     lines.push('📐 Cubre canto:');
@@ -5073,6 +5136,12 @@ function buildSummaryReport() {
       pushLine(`- 🎨 ${label}: ${fmt(meters, 3)} m`);
     });
   }
+
+  return buildSummaryReportCommon(lines, pushLine, fmt);
+}
+
+// Función común que construye el resto del reporte
+function buildSummaryReportCommon(lines, pushLine, fmt) {
 
   const plates = getPlates();
   if (plates.length) {
@@ -5259,13 +5328,13 @@ async function handleSendCuts() {
     const jsonFilename = `${slug || 'cortes'}-proyecto.json`;
     triggerBlobDownload(jsonFilename, jsonBlob);
     const subjectName = rawName || title || 'Plano de cortes';
-    const bodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
-    const summaryReport = buildSummaryReport();
+    const bodyText = `Se adjunta la configuración de cortes "${subjectName}" generado desde la aplicación. Para su futuro uso.`;
     const adminEmail = 'marcossuhit@gmail.com';
     const recipientsSent = [];
     const sendErrors = [];
 
-    const buildCommonBody = () => `${bodyText}\n\n${summaryReport}`;
+    const buildAdminBody = () => `${bodyText}\n\n${buildSummaryReportAdmin()}`;
+    const buildClientBody = () => `${bodyText}\n\n${buildSummaryReportClient()}`;
     const sendTo = async (to, text, { attachPdf = true } = {}) => {
       if (!attachPdf) {
         await sendPlainEmail({ from: fromEmail, to, subject: `Plano de cortes - ${subjectName}`, text });
@@ -5283,7 +5352,7 @@ async function handleSendCuts() {
 
     if (adminEmail) {
       try {
-        await sendTo(adminEmail, buildCommonBody());
+        await sendTo(adminEmail, buildAdminBody());
         recipientsSent.push(adminEmail);
       } catch (err) {
         console.error('No se pudo enviar al administrador', err);
@@ -5294,7 +5363,7 @@ async function handleSendCuts() {
     const userEmail = (authUser.email || '').trim();
     if (userEmail) {
       const greeting = authUser.name ? `Hola ${authUser.name.trim()},` : 'Hola,';
-      const userText = `${greeting}\n\n${buildCommonBody()}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
+      const userText = `${greeting}\n\n${buildClientBody()}\n\nGuardá el archivo descargado para reutilizar este proyecto en la app.`;
       try {
         await sendTo(userEmail, userText, { attachPdf: false });
         recipientsSent.push(userEmail);
