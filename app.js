@@ -2652,6 +2652,26 @@ function makeRow(index) {
     if (!Number.isFinite(parsed)) parsed = 0;
     parsed = clamp(parsed, 0, 2);
     if (String(parsed) !== input.value) input.value = String(parsed);
+    
+    // Auto-seleccionar BLANCO cuando el valor es mayor a 0
+    if (parsed > 0) {
+      const isWidthInput = input === iWLevel;
+      const select = isWidthInput ? wEdgeSelect : hEdgeSelect;
+      
+      // Si no tiene selección o tiene "sin cubre canto", seleccionar BLANCO
+      const currentValue = (select?.value || '').trim();
+      if (!currentValue || /^sin\s+cubre\s*canto/i.test(currentValue)) {
+        // Buscar opción que contenga "BLANCO"
+        const blancoOption = Array.from(select?.options || []).find(opt => 
+          opt.textContent.toUpperCase().includes('BLANCO')
+        );
+        if (blancoOption) {
+          select.value = blancoOption.value;
+          handleEdgeSelectChange();
+        }
+      }
+    }
+    
     syncEdgesFromTierInputs({ emitChange: true });
   };
   tierInputs.forEach((input) => {
