@@ -2696,8 +2696,25 @@ function makeRow(index) {
     syncLabelDataset(wEdgeSelect);
     syncLabelDataset(hEdgeSelect);
     syncStoredEdgeNames();
+    updateEdgeColors();
     scheduleLayoutRecalc({ priority: 'normal' });
     if (typeof persistState === 'function') persistState();
+  };
+
+  const updateEdgeColors = () => {
+    const wEdgeLabel = (wEdgeSelect?.dataset?.label || '').trim().toUpperCase();
+    const hEdgeLabel = (hEdgeSelect?.dataset?.label || '').trim().toUpperCase();
+    
+    const widthIsWhite = wEdgeLabel.includes('BLANCO');
+    const heightIsWhite = hEdgeLabel.includes('BLANCO');
+    
+    const horizontalColor = widthIsWhite ? '#fbbf24' : '#ef4444';
+    const verticalColor = heightIsWhite ? '#fbbf24' : '#ef4444';
+    
+    if (edges.top) edges.top.setAttribute('stroke', horizontalColor);
+    if (edges.bottom) edges.bottom.setAttribute('stroke', horizontalColor);
+    if (edges.left) edges.left.setAttribute('stroke', verticalColor);
+    if (edges.right) edges.right.setAttribute('stroke', verticalColor);
   };
   wEdgeSelect.addEventListener('change', handleEdgeSelectChange);
   hEdgeSelect.addEventListener('change', handleEdgeSelectChange);
@@ -2892,6 +2909,8 @@ function makeRow(index) {
     const el = edges[key];
     el.setAttribute('class', 'edge');
     el.dataset.selected = '0';
+    el.setAttribute('stroke', '#fbbf24');
+    el.setAttribute('stroke-width', '3');
     el.addEventListener('click', () => handleEdgeToggle(el));
     g.appendChild(el);
   }
@@ -2991,12 +3010,14 @@ function makeRow(index) {
       } else {
         dims.textContent = `${fmtSize(w)} × ${fmtSize(h)} mm`;
       }
+      updateEdgeColors();
     } else {
       // Al bloquear, limpiar selección de bordes
       for (const key of Object.keys(edges)) {
         const el = edges[key];
         el.dataset.selected = '0';
         el.classList.remove('selected');
+        el.setAttribute('stroke', '#fbbf24');
       }
       // Placeholder centrado dentro del área visible
       rw = innerW * 0.72;
