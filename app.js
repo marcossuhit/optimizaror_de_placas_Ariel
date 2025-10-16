@@ -857,7 +857,7 @@ function updateSummaryWithAdvancedReport(report) {
           <div style="margin-bottom:4px;">📊 <span style="color:#cbd5e1;">Utilización:</span> <span style="color:#10b981;font-weight:600;">${plate.utilization}</span></div>
           <div style="margin-bottom:4px;">♻️ <span style="color:#cbd5e1;">Desperdicio:</span> <span style="color:#ef4444;font-weight:600;">${wastePercent}%</span> <span style="color:#64748b;">(${wasteAreaM2} m²)</span></div>
           <div style="margin-bottom:4px;">✅ <span style="color:#cbd5e1;">Área utilizada:</span> ${usedAreaM2} m²</div>
-          <div style="margin-bottom:4px;">🔪 <span style="color:#cbd5e1;">Cortes totales:</span> ${plate.cutSequence.sequence.length} <span style="color:#64748b;">(${plate.cutSequence.vertical.length} vert. + ${plate.cutSequence.horizontal.length} horiz.)</span></div>
+          <div style="margin-bottom:4px;">⚙️ <span style="color:#cbd5e1;">Cortes totales:</span> ${plate.cutSequence.sequence.length} <span style="color:#64748b;">(${plate.cutSequence.vertical.length} vert. + ${plate.cutSequence.horizontal.length} horiz.)</span></div>
         </div>
       `;
       summaryListEl.appendChild(plateDiv);
@@ -2722,19 +2722,67 @@ function makeRow(index) {
   };
 
   const updateEdgeColors = () => {
-    const wEdgeLabel = (wEdgeSelect?.dataset?.label || '').trim().toUpperCase();
-    const hEdgeLabel = (hEdgeSelect?.dataset?.label || '').trim().toUpperCase();
+    // Obtener el texto completo de la opción seleccionada
+    const getSelectedText = (select) => {
+      if (!select) return '';
+      const option = select.selectedOptions?.[0];
+      if (!option) return '';
+      return (option.textContent || '').trim().toUpperCase();
+    };
     
-    const widthIsWhite = wEdgeLabel.includes('BLANCO');
-    const heightIsWhite = hEdgeLabel.includes('BLANCO');
+    const wEdgeText = getSelectedText(wEdgeSelect);
+    const hEdgeText = getSelectedText(hEdgeSelect);
     
-    const horizontalColor = widthIsWhite ? '#fbbf24' : '#ef4444';
-    const verticalColor = heightIsWhite ? '#fbbf24' : '#ef4444';
+    console.log('🎨 updateEdgeColors:', {
+      wEdgeText,
+      hEdgeText,
+      widthHasBlanco: wEdgeText.includes('BLANCO'),
+      heightHasBlanco: hEdgeText.includes('BLANCO')
+    });
     
-    if (edges.top) edges.top.setAttribute('stroke', horizontalColor);
-    if (edges.bottom) edges.bottom.setAttribute('stroke', horizontalColor);
-    if (edges.left) edges.left.setAttribute('stroke', verticalColor);
-    if (edges.right) edges.right.setAttribute('stroke', verticalColor);
+    // Determinar color según nueva lógica:
+    // - Sin selección o "sin cubre canto" → ROJO
+    // - BLANCO seleccionado → BLANCO
+    // - Cualquier otro color → AMARILLO
+    const getEdgeColor = (text) => {
+      if (!text || text === '' || text.includes('SIN CUBRE')) {
+        return '#ef4444'; // Rojo para sin selección o "sin cubre canto"
+      }
+      if (text.includes('BLANCO')) {
+        return '#ffffff'; // Blanco para BLANCO
+      }
+      return '#fbbf24'; // Amarillo para otros colores
+    };
+    
+    const horizontalColor = getEdgeColor(wEdgeText);
+    const verticalColor = getEdgeColor(hEdgeText);
+    
+    // Solo aplicar color a los bordes que están SELECCIONADOS
+    // Bordes horizontales (top/bottom)
+    if (edges.top && edges.top.dataset.selected === '1') {
+      edges.top.style.stroke = horizontalColor;
+    } else if (edges.top) {
+      edges.top.style.stroke = '#ef4444';
+    }
+    
+    if (edges.bottom && edges.bottom.dataset.selected === '1') {
+      edges.bottom.style.stroke = horizontalColor;
+    } else if (edges.bottom) {
+      edges.bottom.style.stroke = '#ef4444';
+    }
+    
+    // Bordes verticales (left/right)
+    if (edges.left && edges.left.dataset.selected === '1') {
+      edges.left.style.stroke = verticalColor;
+    } else if (edges.left) {
+      edges.left.style.stroke = '#ef4444';
+    }
+    
+    if (edges.right && edges.right.dataset.selected === '1') {
+      edges.right.style.stroke = verticalColor;
+    } else if (edges.right) {
+      edges.right.style.stroke = '#ef4444';
+    }
   };
   wEdgeSelect.addEventListener('change', handleEdgeSelectChange);
   hEdgeSelect.addEventListener('change', handleEdgeSelectChange);
@@ -2929,7 +2977,7 @@ function makeRow(index) {
     const el = edges[key];
     el.setAttribute('class', 'edge');
     el.dataset.selected = '0';
-    el.setAttribute('stroke', '#fbbf24');
+    el.style.stroke = '#ef4444';
     el.setAttribute('stroke-width', '3');
     el.addEventListener('click', () => handleEdgeToggle(el));
     g.appendChild(el);
@@ -3037,7 +3085,7 @@ function makeRow(index) {
         const el = edges[key];
         el.dataset.selected = '0';
         el.classList.remove('selected');
-        el.setAttribute('stroke', '#fbbf24');
+        el.style.stroke = '#ef4444';
       }
       // Placeholder centrado dentro del área visible
       rw = innerW * 0.72;
@@ -4715,7 +4763,7 @@ async function buildExportCanvasForPdf() {
         lines.forEach((line) => {
           // Limpiar emojis pero mantener estructura
           const cleaned = line
-            .replace(/📋|📐|📦|📊|♻️|✅|🔪|💰|💵/g, '')
+            .replace(/📋|📐|📦|📊|♻️|✅|⚙️|💰|💵/g, '')
             .trim();
           if (cleaned) {
             // Si es el título (contiene "Placa"), no indentar
