@@ -51,6 +51,23 @@ function normaliseMaterialName(name) {
   return (name || '').trim();
 }
 
+// Normaliza el nombre de un item para comparación case-insensitive
+function normalizeItemName(name) {
+  return (name || '').trim().toLowerCase();
+}
+
+// Verifica si un item es protegido (no puede ser eliminado)
+function isProtectedItem(name, type = 'material') {
+  const normalized = normalizeItemName(name);
+  if (type === 'material') {
+    return normalized === 'mdf blanco';
+  }
+  if (type === 'edge') {
+    return normalized === 'blanco';
+  }
+  return false;
+}
+
 function formatPrice(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : '0.00';
@@ -359,12 +376,17 @@ function renderStock() {
 
   stockItems.forEach((item, index) => {
     const row = document.createElement('tr');
+    const isProtected = isProtectedItem(item.material, 'material');
 
     const materialTd = document.createElement('td');
     const materialBtn = document.createElement('button');
     materialBtn.type = 'button';
     materialBtn.className = 'link-button';
     materialBtn.textContent = item.material;
+    if (isProtected) {
+      materialBtn.textContent += ' 🔒';
+      materialBtn.title = 'Material protegido: solo se puede editar el precio';
+    }
     materialBtn.addEventListener('click', () => {
       if (!materialInput) return;
       materialInput.value = item.material;
@@ -383,7 +405,17 @@ function renderStock() {
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn danger btn-small';
     deleteBtn.textContent = 'Eliminar';
+    deleteBtn.disabled = isProtected;
+    if (isProtected) {
+      deleteBtn.title = 'Este material no puede ser eliminado';
+      deleteBtn.style.opacity = '0.5';
+      deleteBtn.style.cursor = 'not-allowed';
+    }
     deleteBtn.addEventListener('click', () => {
+      if (isProtected) {
+        alert(`"${item.material}" es un material protegido y no puede ser eliminado.`);
+        return;
+      }
       stockItems.splice(index, 1);
       persist(STORAGE_KEY, stockItems);
       renderStock();
@@ -411,12 +443,17 @@ function renderEdges() {
 
   edgeItems.forEach((item, index) => {
     const row = document.createElement('tr');
+    const isProtected = isProtectedItem(item.name, 'edge');
 
     const nameTd = document.createElement('td');
     const nameBtn = document.createElement('button');
     nameBtn.type = 'button';
     nameBtn.className = 'link-button';
     nameBtn.textContent = item.name;
+    if (isProtected) {
+      nameBtn.textContent += ' 🔒';
+      nameBtn.title = 'Cubre canto protegido: solo se puede editar el precio';
+    }
     nameBtn.addEventListener('click', () => {
       edgeNameInput.value = item.name;
       edgePriceInput.value = String(item.pricePerMeter);
@@ -434,7 +471,17 @@ function renderEdges() {
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn danger btn-small';
     deleteBtn.textContent = 'Eliminar';
+    deleteBtn.disabled = isProtected;
+    if (isProtected) {
+      deleteBtn.title = 'Este cubre canto no puede ser eliminado';
+      deleteBtn.style.opacity = '0.5';
+      deleteBtn.style.cursor = 'not-allowed';
+    }
     deleteBtn.addEventListener('click', () => {
+      if (isProtected) {
+        alert(`"${item.name}" es un cubre canto protegido y no puede ser eliminado.`);
+        return;
+      }
       edgeItems.splice(index, 1);
       persist(EDGE_STORAGE_KEY, edgeItems);
       renderEdges();
@@ -500,12 +547,26 @@ function renderAdmins() {
 }
 
 function addOrUpdateItem(material, price) {
-  const existing = stockItems.find(item => item.material.toLowerCase() === material.toLowerCase());
-  if (existing) {
+  const normalizedMaterial = material.toLowerCase();
+  const existingIndex = stockItems.findIndex(item => item.material.toLowerCase() === normalizedMaterial);
+  
+  if (existingIndex !== -1) {
+    // Actualizar existente
+    const existing = stockItems[existingIndex];
+    const isProtected = isProtectedItem(existing.material, 'material');
+    
+    // Si es protegido, solo permite cambiar precio
+    if (isProtected && normalizeItemName(material) !== normalizeItemName(existing.material)) {
+      alert(`"${existing.material}" es un material protegido. Solo podés cambiar su precio, no el nombre.`);
+      return;
+    }
+    
     existing.price = price;
   } else {
+    // Nuevo item
     stockItems.push({ material, price });
   }
+  
   stockItems = normaliseStockItems(stockItems);
   persist(STORAGE_KEY, stockItems);
   renderStock();
@@ -513,12 +574,26 @@ function addOrUpdateItem(material, price) {
 }
 
 function addOrUpdateEdge(name, pricePerMeter) {
-  const existing = edgeItems.find(item => item.name.toLowerCase() === name.toLowerCase());
-  if (existing) {
+  const normalizedName = name.toLowerCase();
+  const existingIndex = edgeItems.findIndex(item => item.name.toLowerCase() === normalizedName);
+  
+  if (existingIndex !== -1) {
+    // Actualizar existente
+    const existing = edgeItems[existingIndex];
+    const isProtected = isProtectedItem(existing.name, 'edge');
+    
+    // Si es protegido, solo permite cambiar precio
+    if (isProtected && normalizeItemName(name) !== normalizeItemName(existing.name)) {
+      alert(`"${existing.name}" es un cubre canto protegido. Solo podés cambiar su precio, no el nombre.`);
+      return;
+    }
+    
     existing.pricePerMeter = pricePerMeter;
   } else {
+    // Nuevo item
     edgeItems.push({ name, pricePerMeter });
   }
+  
   edgeItems = normaliseEdgeItems(edgeItems);
   persist(EDGE_STORAGE_KEY, edgeItems);
   renderEdges();
@@ -540,6 +615,25 @@ function addOrUpdateAdmin(name, email) {
 
 function handleDownload() {
   exportStockText();
+}
+
+// Asegura que los items protegidos existan
+function ensureDefaultItems() {
+  if (!isAdmin) return;
+  
+  // Verificar MDF Blanco
+  const hasMdfBlanco = stockItems.some(item => normalizeItemName(item.material) === 'mdf blanco');
+  if (!hasMdfBlanco) {
+    stockItems.push({ material: 'MDF Blanco', price: 0 });
+    console.log('✅ Item protegido "MDF Blanco" creado automáticamente');
+  }
+  
+  // Verificar Blanco en cubre cantos
+  const hasBlanco = edgeItems.some(item => normalizeItemName(item.name) === 'blanco');
+  if (!hasBlanco) {
+    edgeItems.push({ name: 'Blanco', pricePerMeter: 0 });
+    console.log('✅ Cubre canto protegido "Blanco" creado automáticamente');
+  }
 }
 
 async function bootstrap() {
@@ -675,6 +769,15 @@ async function bootstrap() {
   }
   renderEdges();
 
+  // Asegurar que los items protegidos existan
+  ensureDefaultItems();
+  if (isAdmin) {
+    const needsStockSave = !stockItems.some(item => normalizeItemName(item.material) === 'mdf blanco');
+    const needsEdgeSave = !edgeItems.some(item => normalizeItemName(item.name) === 'blanco');
+    if (needsStockSave) persist(STORAGE_KEY, stockItems);
+    if (needsEdgeSave) persist(EDGE_STORAGE_KEY, edgeItems);
+  }
+
   if (useRemote) {
     remoteStockUnsubscribe = StockSync.watchStock((items) => {
       applyRemoteStockItems(items);
@@ -809,6 +912,13 @@ if (deleteMaterialBtn) {
       alert('Seleccione un material para eliminar.');
       return;
     }
+    
+    // Verificar si es protegido
+    if (isProtectedItem(material, 'material')) {
+      alert(`"${material}" es un material protegido y no puede ser eliminado.`);
+      return;
+    }
+    
     const index = stockItems.findIndex(item => item.material.toLowerCase() === material.toLowerCase());
     if (index === -1) {
       alert('El material no existe en el stock.');
@@ -854,6 +964,13 @@ if (edgeDeleteBtn) {
       alert('Seleccioná un cubre canto para eliminar.');
       return;
     }
+    
+    // Verificar si es protegido
+    if (isProtectedItem(name, 'edge')) {
+      alert(`"${name}" es un cubre canto protegido y no puede ser eliminado.`);
+      return;
+    }
+    
     const index = edgeItems.findIndex(item => item.name.toLowerCase() === name.toLowerCase());
     if (index === -1) {
       alert('Ese cubre canto no está en la lista.');
