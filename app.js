@@ -3522,8 +3522,10 @@ function serializeState() {
     const h = parseFloat(heightInput?.value) || 0;
     const widthTier = parseInt(row.querySelector('input[data-role="width-tier"]')?.value ?? '', 10);
     const heightTier = parseInt(row.querySelector('input[data-role="height-tier"]')?.value ?? '', 10);
-    const widthEdgeSelect = row.querySelector('select[data-role="width-edge"]');
-    const heightEdgeSelect = row.querySelector('select[data-role="height-edge"]');
+  const widthEdgeSelect = row.querySelector('select[data-role="width-edge"]');
+  const heightEdgeSelect = row.querySelector('select[data-role="height-edge"]');
+  const widthEdgeLabel = widthEdgeSelect?.dataset?.label || row._edgeNames?.horizontal || widthEdgeSelect?.value || '';
+  const heightEdgeLabel = heightEdgeSelect?.dataset?.label || row._edgeNames?.vertical || heightEdgeSelect?.value || '';
     const rotEl = row.querySelector('.rot-label input');
     const manualRot = row._manualRotWanted;
     const rot = typeof manualRot === 'boolean' ? manualRot : !!(rotEl && rotEl.checked);
@@ -3537,7 +3539,9 @@ function serializeState() {
       widthTier: Number.isFinite(widthTier) ? clamp(widthTier, 0, 2) : null,
       heightTier: Number.isFinite(heightTier) ? clamp(heightTier, 0, 2) : null,
       widthEdge: widthEdgeSelect && widthEdgeSelect.value ? widthEdgeSelect.value : null,
-      heightEdge: heightEdgeSelect && heightEdgeSelect.value ? heightEdgeSelect.value : null
+      heightEdge: heightEdgeSelect && heightEdgeSelect.value ? heightEdgeSelect.value : null,
+      widthEdgeLabel: widthEdgeLabel || null,
+      heightEdgeLabel: heightEdgeLabel || null
     };
   });
   const name = (projectNameEl?.value || '').trim();
@@ -4267,6 +4271,15 @@ function collectPiecesFromState(state) {
     const color = getRowColor(idx);
     const baseId = totalRequested;
     
+    // Capturar información de cubre cantos
+    const edges = row.edges || [false, false, false, false]; // [top, right, bottom, left]
+  const widthTier = row.widthTier;
+  const heightTier = row.heightTier;
+  const widthEdge = row.widthEdge || '';
+  const heightEdge = row.heightEdge || '';
+  const widthEdgeLabel = row.widthEdgeLabel || widthEdge;
+  const heightEdgeLabel = row.heightEdgeLabel || heightEdge;
+    
     for (let i = 0; i < qty; i++) {
       const pieceId = `${idx}-${baseId + i}`;
       pieces.push({
@@ -4278,7 +4291,14 @@ function collectPiecesFromState(state) {
         rot,
         area: rawW * rawH,
         order: pieces.length,
-        dimKey: dimensionKeyNormalized(rawW, rawH)
+        dimKey: dimensionKeyNormalized(rawW, rawH),
+        edges: edges,
+        widthTier: widthTier,
+        heightTier: heightTier,
+        widthEdge: widthEdge,
+        heightEdge: heightEdge,
+        widthEdgeLabel,
+        heightEdgeLabel
       });
     }
     totalRequested += qty;
@@ -4349,7 +4369,18 @@ async function renderWithAdvancedOptimizer() {
     
     // Calcular hash de los datos para detectar cambios
     const dataHash = JSON.stringify({
-      pieces: pieces.map(p => ({ w: p.width, h: p.height, id: p.id })),
+      pieces: pieces.map(p => ({
+        w: p.width,
+        h: p.height,
+        id: p.id,
+        edges: Array.isArray(p.edges) ? p.edges : null,
+        widthEdge: p.widthEdge || '',
+        heightEdge: p.heightEdge || '',
+        widthEdgeLabel: p.widthEdgeLabel || '',
+        heightEdgeLabel: p.heightEdgeLabel || '',
+        widthTier: Number.isFinite(p.widthTier) ? p.widthTier : null,
+        heightTier: Number.isFinite(p.heightTier) ? p.heightTier : null
+      })),
       plate: { w: plateWidth, h: plateHeight },
       options: { kerf, trimLeft, trimTop, trimRight, trimBottom, rot: options.allowRotation }
     });
@@ -4409,7 +4440,14 @@ function gatherPiecesFromRows() {
     color: p.color,
     label: `${p.rawW}×${p.rawH}`,
     quantity: 1,
-    rowIndex: p.rowIdx
+    rowIndex: p.rowIdx,
+    edges: p.edges || [false, false, false, false],
+    widthTier: p.widthTier,
+    heightTier: p.heightTier,
+    widthEdge: p.widthEdge || '',
+    heightEdge: p.heightEdge || '',
+    widthEdgeLabel: p.widthEdgeLabel || '',
+    heightEdgeLabel: p.heightEdgeLabel || ''
   }));
 }
 
@@ -4585,6 +4623,146 @@ function renderAdvancedSolution(optimizationResult, plateSpec) {
           svg.appendChild(rotLabel);
         }
       }
+      
+      // Dibujar indicadores de cubre cantos
+      {
+        const edgeFlags = Array.isArray(p.piece.edges) ? p.piece.edges : [];
+        const widthTierCount = Number.isFinite(p.piece.widthTier) ? p.piece.widthTier : null;
+        const heightTierCount = Number.isFinite(p.piece.heightTier) ? p.piece.heightTier : null;
+
+        const resolveFlag = (flag, fallback) => (typeof flag === 'boolean' ? flag : fallback);
+        const hasTopEdge = resolveFlag(edgeFlags[0], widthTierCount != null ? widthTierCount >= 1 : false);
+        const hasRightEdge = resolveFlag(edgeFlags[1], heightTierCount != null ? heightTierCount >= 1 : false);
+        const hasBottomEdge = resolveFlag(edgeFlags[2], widthTierCount != null ? widthTierCount >= 2 : false);
+        const hasLeftEdge = resolveFlag(edgeFlags[3], heightTierCount != null ? heightTierCount >= 2 : false);
+
+  const edgeLabelFontSize = Math.max(6, Math.min(pxW, pxH) * 0.08);
+  const lineLength = 0.6; // 60% de la longitud total
+  const lineOffset = 20; // Separación dentro del borde de la pieza
+  const widthEdgeName = (p.piece.widthEdgeLabel || p.piece.widthEdge || '').trim();
+  const heightEdgeName = (p.piece.heightEdgeLabel || p.piece.heightEdge || '').trim();
+
+        // Borde superior (horizontal)
+        if (hasTopEdge && widthEdgeName) {
+          const lineCenterX = pxX + pxW / 2;
+          const lineStartX = lineCenterX - (pxW * lineLength) / 2;
+          const lineEndX = lineCenterX + (pxW * lineLength) / 2;
+          const lineY = pxY + lineOffset;
+
+          const edgeLine = document.createElementNS(svgNS, 'line');
+          edgeLine.setAttribute('class', 'edge-indicator');
+          edgeLine.setAttribute('x1', String(lineStartX));
+          edgeLine.setAttribute('y1', String(lineY));
+          edgeLine.setAttribute('x2', String(lineEndX));
+          edgeLine.setAttribute('y2', String(lineY));
+          edgeLine.setAttribute('stroke', '#fff');
+          edgeLine.setAttribute('stroke-width', '1');
+          svg.appendChild(edgeLine);
+
+          const edgeLabel = document.createElementNS(svgNS, 'text');
+          edgeLabel.setAttribute('class', 'edge-label');
+          edgeLabel.setAttribute('text-anchor', 'middle');
+          edgeLabel.setAttribute('x', String(lineCenterX));
+          edgeLabel.setAttribute('y', String(lineY - 2));
+          edgeLabel.setAttribute('font-size', String(edgeLabelFontSize));
+          edgeLabel.setAttribute('fill', '#fff');
+          edgeLabel.setAttribute('font-weight', 'bold');
+          edgeLabel.textContent = widthEdgeName;
+          svg.appendChild(edgeLabel);
+        }
+
+        // Borde derecho (vertical)
+        if (hasRightEdge && heightEdgeName) {
+          const lineCenterY = pxY + pxH / 2;
+          const lineStartY = lineCenterY - (pxH * lineLength) / 2;
+          const lineEndY = lineCenterY + (pxH * lineLength) / 2;
+          const lineX = pxX + pxW - lineOffset;
+
+          const edgeLine = document.createElementNS(svgNS, 'line');
+          edgeLine.setAttribute('class', 'edge-indicator');
+          edgeLine.setAttribute('x1', String(lineX));
+          edgeLine.setAttribute('y1', String(lineStartY));
+          edgeLine.setAttribute('x2', String(lineX));
+          edgeLine.setAttribute('y2', String(lineEndY));
+          edgeLine.setAttribute('stroke', '#fff');
+          edgeLine.setAttribute('stroke-width', '1');
+          svg.appendChild(edgeLine);
+
+          const edgeLabel = document.createElementNS(svgNS, 'text');
+          edgeLabel.setAttribute('class', 'edge-label');
+          edgeLabel.setAttribute('text-anchor', 'middle');
+          edgeLabel.setAttribute('x', String(lineX - 2));
+          edgeLabel.setAttribute('y', String(lineCenterY));
+          edgeLabel.setAttribute('font-size', String(edgeLabelFontSize));
+          edgeLabel.setAttribute('fill', '#fff');
+          edgeLabel.setAttribute('font-weight', 'bold');
+          edgeLabel.setAttribute('transform', `rotate(-90 ${lineX - 2} ${lineCenterY})`);
+          edgeLabel.textContent = heightEdgeName;
+          svg.appendChild(edgeLabel);
+        }
+
+        // Borde inferior (horizontal)
+        if (hasBottomEdge && widthEdgeName) {
+          const lineCenterX = pxX + pxW / 2;
+          const lineStartX = lineCenterX - (pxW * lineLength) / 2;
+          const lineEndX = lineCenterX + (pxW * lineLength) / 2;
+          const bottomInset = Math.min(pxH / 2, lineOffset + Math.max(10, edgeLabelFontSize * 0.9));
+          const lineY = pxY + pxH - bottomInset;
+
+          const edgeLine = document.createElementNS(svgNS, 'line');
+          edgeLine.setAttribute('class', 'edge-indicator');
+          edgeLine.setAttribute('x1', String(lineStartX));
+          edgeLine.setAttribute('y1', String(lineY));
+          edgeLine.setAttribute('x2', String(lineEndX));
+          edgeLine.setAttribute('y2', String(lineY));
+          edgeLine.setAttribute('stroke', '#fff');
+          edgeLine.setAttribute('stroke-width', '1');
+          svg.appendChild(edgeLine);
+
+          const edgeLabel = document.createElementNS(svgNS, 'text');
+          edgeLabel.setAttribute('class', 'edge-label');
+          edgeLabel.setAttribute('text-anchor', 'middle');
+          edgeLabel.setAttribute('x', String(lineCenterX));
+          edgeLabel.setAttribute('y', String(lineY - 4));
+          edgeLabel.setAttribute('font-size', String(edgeLabelFontSize));
+          edgeLabel.setAttribute('fill', '#fff');
+          edgeLabel.setAttribute('font-weight', 'bold');
+          edgeLabel.textContent = widthEdgeName;
+          svg.appendChild(edgeLabel);
+        }
+
+        // Borde izquierdo (vertical)
+        if (hasLeftEdge && heightEdgeName) {
+          const lineCenterY = pxY + pxH / 2;
+          const lineStartY = lineCenterY - (pxH * lineLength) / 2;
+          const lineEndY = lineCenterY + (pxH * lineLength) / 2;
+          const lineX = pxX + lineOffset;
+          const labelInset = Math.max(6, edgeLabelFontSize * 0.4);
+          const labelX = lineX - labelInset;
+
+          const edgeLine = document.createElementNS(svgNS, 'line');
+          edgeLine.setAttribute('class', 'edge-indicator');
+          edgeLine.setAttribute('x1', String(lineX));
+          edgeLine.setAttribute('y1', String(lineStartY));
+          edgeLine.setAttribute('x2', String(lineX));
+          edgeLine.setAttribute('y2', String(lineEndY));
+          edgeLine.setAttribute('stroke', '#fff');
+          edgeLine.setAttribute('stroke-width', '1');
+          svg.appendChild(edgeLine);
+
+          const edgeLabel = document.createElementNS(svgNS, 'text');
+          edgeLabel.setAttribute('class', 'edge-label');
+          edgeLabel.setAttribute('text-anchor', 'middle');
+          edgeLabel.setAttribute('x', String(labelX));
+          edgeLabel.setAttribute('y', String(lineCenterY));
+          edgeLabel.setAttribute('font-size', String(edgeLabelFontSize));
+          edgeLabel.setAttribute('fill', '#fff');
+          edgeLabel.setAttribute('font-weight', 'bold');
+          edgeLabel.setAttribute('transform', `rotate(-90 ${labelX} ${lineCenterY})`);
+          edgeLabel.textContent = heightEdgeName;
+          svg.appendChild(edgeLabel);
+        }
+      }
     });
     
     // Líneas de corte guillotina
@@ -4737,7 +4915,7 @@ async function buildExportCanvasForPdf() {
     addSummary('');
   }
   
-  // Extraer información de las tarjetas de placas en summaryListEl
+  // Extraer información de las tarjetas de placas en summaryListEl y cubre cantos de los SVGs
   if (summaryListEl && summaryListEl.children) {
     const plateCards = [];
     for (let i = 0; i < summaryListEl.children.length; i++) {
@@ -4754,7 +4932,7 @@ async function buildExportCanvasForPdf() {
     
     if (plateCards.length > 0) {
       addSummary('DETALLE DE PLACAS:');
-      plateCards.forEach((card) => {
+      plateCards.forEach((card, plateIndex) => {
         addSummary('');
         // Extraer todo el texto de la tarjeta y procesarlo línea por línea
         const fullText = card.textContent || '';
@@ -4774,6 +4952,52 @@ async function buildExportCanvasForPdf() {
             }
           }
         });
+        
+        // Extraer información de cubre cantos del SVG correspondiente
+        if (svgs[plateIndex]) {
+          const svg = svgs[plateIndex];
+          const edgeBandLines = svg.querySelectorAll('.edge-band-line');
+          if (edgeBandLines.length > 0) {
+            // Agrupar por nombre de cubre canto y calcular metros totales
+            const edgesByName = {};
+            edgeBandLines.forEach((line) => {
+              const name = (line.getAttribute('data-edge-name') || '').trim();
+              if (!name || name.toUpperCase() === 'BLANCO') return; // Ignorar BLANCO
+              
+              // Obtener dimensiones reales de la pieza en mm
+              const pieceW = parseFloat(line.getAttribute('data-piece-raww') || '0');
+              const pieceH = parseFloat(line.getAttribute('data-piece-rawh') || '0');
+              const orientation = (line.getAttribute('data-edge-orientation') || '').trim();
+              
+              // La longitud real del cubre canto es la dimensión de la pieza en esa dirección
+              let lengthMm = 0;
+              if (orientation === 'horizontal') {
+                lengthMm = pieceW; // Ancho de la pieza
+              } else if (orientation === 'vertical') {
+                lengthMm = pieceH; // Alto de la pieza
+              }
+              
+              const lengthM = lengthMm / 1000;
+              
+              if (lengthM > 0) {
+                if (!edgesByName[name]) {
+                  edgesByName[name] = 0;
+                }
+                edgesByName[name] += lengthM;
+              }
+            });
+            
+            // Si hay cubre cantos, agregarlos al resumen
+            const edgeNames = Object.keys(edgesByName).sort();
+            if (edgeNames.length > 0) {
+              addSummary(`  Cubre Cantos:`);
+              edgeNames.forEach(name => {
+                const meters = edgesByName[name];
+                addSummary(`    - ${name}: ${meters.toFixed(2)} m`);
+              });
+            }
+          }
+        }
       });
       addSummary('');
     }

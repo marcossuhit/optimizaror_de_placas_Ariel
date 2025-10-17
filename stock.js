@@ -55,7 +55,6 @@ function normaliseMaterialName(name) {
 function normalizeItemName(name) {
   return (name || '').trim().toLowerCase();
 }
-
 // Verifica si un item es protegido (no puede ser eliminado)
 function isProtectedItem(name, type = 'material') {
   const normalized = normalizeItemName(name);
