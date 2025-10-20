@@ -3,131 +3,57 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Login · Optimizador de Placas</title>
+    <title>PCAMOBLAMIENTOS · Acceso</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="icon" type="image/jpeg" href="icons/pcicon.jpeg" />
+    <link rel="apple-touch-icon" href="icons/pcicon.jpeg" />
     <style>
-      .login-form-fields {
+      .login-card--google .login-actions {
         display: grid;
-        gap: 14px;
+        gap: 22px;
       }
-      .input-field {
-        display: flex;
-        align-items: center;
-        border-radius: 12px;
-        overflow: hidden;
-        background: #111827;
-        border: 1px solid rgba(107, 114, 128, 0.45);
-        box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
-      }
-      .input-icon {
-        padding: 0 16px;
-        color: rgba(251, 191, 36, 0.85);
-        display: grid;
-        place-items: center;
-        font-size: 1.1rem;
-      }
-      .input-field input,
-      .input-field select {
-        border: none;
-        background: transparent;
-        padding: 14px 16px;
-        font-size: 1rem;
-        color: #f8fafc;
-      }
-      .input-field input { flex: 1 1 auto; min-width: 0; }
-      .input-field select {
-        width: 134px;
-        flex: 0 0 auto;
-      }
-      .input-field input::placeholder { color: rgba(226, 232, 240, 0.55); }
-      .input-field span.separator {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 10px;
-        min-height: 100%;
-        color: rgba(226, 232, 240, 0.78);
-        font-weight: 700;
-        letter-spacing: .02em;
-      }
-      .input-field select {
-        cursor: pointer;
-        font-weight: 600;
-        background: linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
-        color: #fbbf24;
-      }
-      .login-actions form {
-        display: grid;
-        gap: 24px;
-        width: 100%;
-      }
-      .login-actions label {
-        display: grid;
-        gap: 10px;
-        font-weight: 600;
-        color: rgba(226, 232, 240, 0.8);
-        font-size: .82rem;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-      }
-      .login-actions small {
-        color: rgba(226, 232, 240, 0.6);
-        font-size: .78rem;
-        line-height: 1.5;
+      .login-card--google .login-note {
+        margin: 0;
         text-align: center;
+        color: rgba(226, 232, 240, 0.72);
+        font-size: 0.85rem;
       }
     </style>
   </head>
-  <body class="login-page">
-    <main class="login-wrapper">
-      <div class="login-stage">
-        <div class="login-card">
-          <div class="login-card__hero">
-            <h2>Panel de Corte</h2>
+  <body class="login-page login-page--pc">
+    <main class="login-wrapper login-wrapper--pc">
+      <div class="login-card login-card--pc login-card--google">
+        <section class="login-brand" aria-labelledby="pcBrandTitle">
+          <div class="login-brand__media">
+            <img src="icons/pcicon.jpeg" alt="Logo PCAMOBLAMIENTOS" class="login-brand__image" />
           </div>
-          <div class="login-card__avatar" aria-hidden="true">
-            <div class="avatar-circle">
-              <span class="avatar-icon">⚙️</span>
-            </div>
-          </div>
-          <section class="login-card__panel">
-            <header class="login-header">
-              <h1>Taller Automatizado</h1>
-              <p>Programá tus cortes de melamina y MDF con precisión industrial.</p>
-            </header>
-            <section class="login-actions">
-              <form id="manualLoginForm" autocomplete="off">
-                <label for="loginUserInput">
-                  Correo electrónico
-                  <div class="login-form-fields">
-                    <div class="input-field">
-                      <span class="input-icon" aria-hidden="true">👤</span>
-                      <input id="loginUserInput" type="text" placeholder="tuemail" aria-label="Nombre de usuario" required />
-                      <span class="separator">@</span>
-                      <select id="loginDomainSelect" aria-label="Dominio" required>
-                        <option value="gmail.com">gmail.com</option>
-                        <option value="hotmail.com">hotmail.com</option>
-                        <option value="yahoo.com">yahoo.com</option>
-                        <option value="outlook.com">outlook.com</option>
-                        <option value="empresa.com">empresa.com</option>
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <small>Acceso sin contraseña. Usaremos este correo para identificarte y como remitente de los cortes enviados.</small>
-                <button type="submit" class="btn primary login-btn">Ingresar</button>
-              </form>
-            </section>
-            <footer class="login-footer">
-              <p>¿Preferís el ingreso con Google?<br /><a href="login2.html">Accedé con Google de forma clásica</a>.</p>
-            </footer>
-            <footer class="login-policy">
-              <p>
-                <a href="https://www.placasfernando.com.ar/privacy.html">Política de Privacidad</a>
-              </p>
-            </footer>
+          <p class="login-brand__tag">PC = Pájaro Carpintero</p>
+          <h1 id="pcBrandTitle" class="login-brand__title">PCAMOBLAMIENTOS</h1>
+          <p class="login-brand__subtitle">Taller conectado para amoblamientos a medida.</p>
+          <ul class="login-brand__highlights">
+            <li>Sincronizá tus cortes con nuestro equipo.</li>
+            <li>Gestión segura con autenticación de Google.</li>
+            <li>Acompañamiento personalizado en cada proyecto.</li>
+          </ul>
+        </section>
+        <section class="login-panel login-panel--google">
+          <header class="login-header login-header--pc">
+            <h2>Ingresá con tu cuenta Google</h2>
+            <p>Activá tu acceso corporativo y mantené tus proyectos en sintonía con PCAMOBLAMIENTOS.</p>
+          </header>
+          <section class="login-actions">
+            <button class="btn primary login-btn" data-google-login data-mode="signin">Ingresar con Google</button>
+            <p class="login-note">Se requiere una cuenta de Google autorizada por PCAMOBLAMIENTOS.</p>
           </section>
-        </div>
+          <footer class="login-footer">
+            <p>¿Necesitás ayuda con el acceso?<br />Contactá al equipo de PCAMOBLAMIENTOS.</p>
+          </footer>
+          <footer class="login-policy">
+            <p>
+              <a href="https://www.placasfernando.com.ar/privacy.html">Política de privacidad PCAMOBLAMIENTOS</a>
+            </p>
+          </footer>
+        </section>
       </div>
     </main>
 

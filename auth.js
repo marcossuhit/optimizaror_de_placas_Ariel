@@ -147,33 +147,6 @@
 
   document.addEventListener('DOMContentLoaded', () => {
   applyLoginRedirect();
-  const manualLoginForm = document.getElementById('manualLoginForm');
-  if (manualLoginForm) {
-    manualLoginForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const userInput = document.getElementById('loginUserInput');
-      const domainSelect = document.getElementById('loginDomainSelect');
-      const rawUser = (userInput?.value || '').trim();
-      const domain = (domainSelect?.value || '').trim();
-      if (!rawUser) {
-        alert('Ingresá tu nombre de usuario.');
-        userInput?.focus();
-        return;
-      }
-      if (!/^[a-zA-Z0-9._-]+$/.test(rawUser)) {
-        alert('El usuario solo puede contener letras, números, puntos, guiones y guiones bajos.');
-        userInput?.focus();
-        return;
-      }
-      if (!domain) {
-        alert('Seleccioná un dominio válido.');
-        domainSelect?.focus();
-        return;
-      }
-      const email = `${rawUser}@${domain}`.toLowerCase();
-      completeLogin({ email, provider: 'manual' });
-    });
-  }
   document.querySelectorAll('[data-google-login]').forEach((btn) => {
     btn.addEventListener('click', () => {
       startGoogleOAuth(btn.dataset.mode || 'signin');

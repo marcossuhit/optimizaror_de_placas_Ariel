@@ -32,7 +32,7 @@ let edgeItems = [];
 let adminItems = [];
 
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
-const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com'];
+const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'ludovicots@gmail.com'];
 let allowedAdminEmailSet = new Set(DEFAULT_ADMIN_EMAILS.map((email) => email.toLowerCase()));
 let isAdmin = false;
 const StockSync = window.StockSync || null;

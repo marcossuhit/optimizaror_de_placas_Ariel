@@ -7,6 +7,6 @@
 window.EMAIL_PROVIDER_CONFIG = {
   service: 'gmail-smtp',
   apiEndpoint: '/api/send-email',
-  fromName: 'Optimizador de Placas',
+  fromName: 'PCAMOBLAMIENTOS',
   fromOverride: 'marcossuhit@gmail.com'
 };

@@ -57,7 +57,7 @@ const signOutBtn = document.getElementById('signOutBtn');
 const sendCutsBtn = document.getElementById('sendCutsBtn');
 const whatsappLink = document.getElementById('whatsAppLink');
 const WHATSAPP_NUMBER = '542494605850';
-const WHATSAPP_MESSAGE = 'Fernando te envio la planificacion de cortes.';
+const WHATSAPP_MESSAGE = 'PCAMOBLAMIENTOS te envia la planificacion de cortes.';
 const sendCutsDefaultLabel = sendCutsBtn?.textContent || 'Enviar cortes';
 const StockSync = window.StockSync || null;
 const REMOTE_STOCK_SYNC_ENABLED = !!(StockSync && typeof StockSync.isConfigured === 'function' && StockSync.isConfigured());
@@ -884,7 +884,7 @@ function updateSummaryWithAdvancedReport(report) {
 
 const authUser = typeof ensureAuthenticated === 'function' ? ensureAuthenticated() : null;
 
-const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'fernandofreireadrian@gmail.com'];
+const DEFAULT_ADMIN_EMAILS = ['marcossuhit@gmail.com', 'ludovicots@gmail.com'];
 let adminDirectory = [];
 let allowedAdminEmailSet = new Set();
 let isBackofficeAllowed = false;
@@ -5745,7 +5745,7 @@ async function handleSendCuts() {
     const subjectName = rawName || title || 'Plano de cortes';
     const adminBodyText = `Se adjunta el plano de cortes "${subjectName}" generado desde la aplicación.`;
     const clientBodyText = `Se adjunta la configuración de cortes "${subjectName}" generado desde la aplicación. Para su futuro uso.`;
-    const adminEmail = 'fernandofreireadrian@gmail.com';
+    const adminEmail = 'ludovicots@gmail.com';
     const recipientsSent = [];
     const sendErrors = [];
 
