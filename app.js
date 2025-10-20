@@ -18,6 +18,7 @@ const resetAllBtn = document.getElementById('resetAllBtn');
 const installBtn = document.getElementById('installBtn');
 const autoRotateToggle = document.getElementById('autoRotateToggle');
 const plateMaterialSelect = document.getElementById('plateMaterialSelect');
+const edgeCatalogSelect = document.getElementById('edgeCatalogSelect');
 const manageStockBtn = document.getElementById('manageStockBtn');
 const themeToggleBtn = document.getElementById('themeToggle');
 const generateLayoutBtn = document.getElementById('generateLayoutBtn');
@@ -1418,6 +1419,62 @@ function formatEdgeLabel(item) {
   return item.name;
 }
 
+function updateEdgeCatalogSelectTitle(select) {
+  if (!select) return;
+  const value = (select.value || '').trim();
+  if (!value) {
+    select.title = edgeCatalog.length ? 'Seleccioná un cubre canto del listado' : 'No hay cubre cantos cargados';
+    return;
+  }
+  const match = edgeCatalog.find((item) => item.name.localeCompare(value, undefined, { sensitivity: 'accent' }) === 0);
+  if (!match) {
+    select.title = value;
+    return;
+  }
+  const hasPrice = Number.isFinite(match.pricePerMeter) && match.pricePerMeter > 0;
+  select.title = hasPrice ? `${match.name} — $${formatNumber(match.pricePerMeter, 2)}/m` : match.name;
+}
+
+function populateEdgeCatalogViewer({ preserveValue = true } = {}) {
+  if (!edgeCatalogSelect) return;
+  const previousValue = preserveValue ? (edgeCatalogSelect.value || '') : '';
+  edgeCatalogSelect.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = edgeCatalog.length ? 'Seleccioná un cubre canto' : 'Sin cubre cantos cargados';
+  placeholder.dataset.placeholder = '1';
+  edgeCatalogSelect.appendChild(placeholder);
+
+  if (!edgeCatalog.length) {
+    edgeCatalogSelect.disabled = true;
+    edgeCatalogSelect.value = '';
+    updateEdgeCatalogSelectTitle(edgeCatalogSelect);
+    return;
+  }
+
+  edgeCatalog.forEach((item) => {
+    const option = document.createElement('option');
+    option.value = item.name;
+    option.textContent = formatEdgeLabel(item);
+    if (Number.isFinite(item.pricePerMeter)) {
+      option.dataset.pricePerMeter = String(item.pricePerMeter);
+    }
+    edgeCatalogSelect.appendChild(option);
+  });
+
+  edgeCatalogSelect.disabled = false;
+  if (previousValue) {
+    edgeCatalogSelect.value = previousValue;
+    if (edgeCatalogSelect.value !== previousValue) {
+      edgeCatalogSelect.value = '';
+    }
+  } else {
+    edgeCatalogSelect.value = '';
+  }
+  updateEdgeCatalogSelectTitle(edgeCatalogSelect);
+}
+
 function populateEdgeSelectOptions(select, selectedValue) {
   if (!select) return;
   const datasetValue = (select.dataset?.value || '').trim();
@@ -1480,6 +1537,7 @@ function populateEdgeSelectOptions(select, selectedValue) {
 function refreshEdgeCatalog({ updateRows = true, catalog } = {}) {
   const source = Array.isArray(catalog) ? normalizeEdgeEntries(catalog) : loadEdgeCatalog();
   edgeCatalog = source.slice();
+  populateEdgeCatalogViewer();
   if (updateRows) {
     getRows().forEach((row) => {
       if (row._refreshEdgeSelects) row._refreshEdgeSelects();
@@ -2653,21 +2711,34 @@ function makeRow(index) {
     parsed = clamp(parsed, 0, 2);
     if (String(parsed) !== input.value) input.value = String(parsed);
     
-    // Auto-seleccionar BLANCO cuando el valor es mayor a 0
+    // Auto-seleccionar el valor del combo principal cuando el valor es mayor a 0
     if (parsed > 0) {
       const isWidthInput = input === iWLevel;
       const select = isWidthInput ? wEdgeSelect : hEdgeSelect;
       
-      // Si no tiene selección o tiene "sin cubre canto", seleccionar BLANCO
+      // Si no tiene selección o tiene "sin cubre canto", usar el combo principal o BLANCO
       const currentValue = (select?.value || '').trim();
       if (!currentValue || /^sin\s+cubre\s*canto/i.test(currentValue)) {
-        // Buscar opción que contenga "BLANCO"
-        const blancoOption = Array.from(select?.options || []).find(opt => 
-          opt.textContent.toUpperCase().includes('BLANCO')
-        );
-        if (blancoOption) {
-          select.value = blancoOption.value;
-          handleEdgeSelectChange();
+        // Primero intentar usar el valor del combo principal
+        const catalogValue = edgeCatalogSelect?.value || '';
+        if (catalogValue) {
+          // Buscar opción que coincida con el combo principal
+          const catalogOption = Array.from(select?.options || []).find(opt => 
+            opt.value === catalogValue
+          );
+          if (catalogOption) {
+            select.value = catalogOption.value;
+            handleEdgeSelectChange();
+          }
+        } else {
+          // Fallback: buscar opción que contenga "BLANCO"
+          const blancoOption = Array.from(select?.options || []).find(opt => 
+            opt.textContent.toUpperCase().includes('BLANCO')
+          );
+          if (blancoOption) {
+            select.value = blancoOption.value;
+            handleEdgeSelectChange();
+          }
         }
       }
     }
@@ -3017,8 +3088,10 @@ function makeRow(index) {
 
   row._navElements = navElements.map(cfg => cfg.el).filter(Boolean);
   row._refreshEdgeSelects = () => {
-    populateEdgeSelectOptions(wEdgeSelect);
-    populateEdgeSelectOptions(hEdgeSelect);
+    // Obtener valor por defecto del combo principal si existe
+    const defaultEdgeValue = edgeCatalogSelect?.value || '';
+    populateEdgeSelectOptions(wEdgeSelect, defaultEdgeValue);
+    populateEdgeSelectOptions(hEdgeSelect, defaultEdgeValue);
     syncStoredEdgeNames();
     updateEdgeSelectState();
   };
@@ -4844,6 +4917,9 @@ if (autoRotateToggle) {
   autoRotateToggle.addEventListener('change', () => {
     applyPlatesGate();
   });
+}
+if (edgeCatalogSelect) {
+  edgeCatalogSelect.addEventListener('change', () => updateEdgeCatalogSelectTitle(edgeCatalogSelect));
 }
 if (plateMaterialSelect) {
   plateMaterialSelect.addEventListener('change', () => {
