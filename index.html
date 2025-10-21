@@ -42,7 +42,11 @@
       <section class="controls">
         <div class="project">
           <label for="projectName">Nombre del proyecto</label>
-          <input id="projectName" type="text" placeholder="Ej: Muebles Juan – Biblioteca" />
+          <input id="projectName" 
+                 type="text" 
+                 placeholder="Ej: Muebles Juan – Biblioteca" 
+                 autocomplete="off"
+                 autocapitalize="words" />
         </div>
         <div class="export-group">
           <button id="installBtn" class="btn" style="display:none">Instalar app</button>
@@ -185,6 +189,7 @@
     <script src="email-provider-config.js"></script>
     <script src="email-provider.js"></script>
     <script src="auth.js"></script>
+    <script src="mobile-utils.js"></script>
     <script type="module" src="app.js"></script>
   </body>
   </html>

@@ -22,11 +22,21 @@
           <div class="admin-form-grid">
             <label>
               Nombre completo
-              <input id="adminNameInput" type="text" placeholder="Ej: Ana Pérez" required />
+              <input id="adminNameInput" 
+                     type="text" 
+                     placeholder="Ej: Ana Pérez" 
+                     autocomplete="name"
+                     autocapitalize="words"
+                     required />
             </label>
             <label>
               Correo electrónico
-              <input id="adminEmailInput" type="email" placeholder="admin@ejemplo.com" required />
+              <input id="adminEmailInput" 
+                     type="email" 
+                     placeholder="admin@ejemplo.com" 
+                     autocomplete="email"
+                     inputmode="email"
+                     required />
             </label>
           </div>
           <div class="admin-form-actions">
@@ -34,16 +44,18 @@
             <button type="button" id="deleteAdminBtn" class="btn danger">Eliminar administrador</button>
           </div>
         </form>
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Correo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="adminTableBody"></tbody>
-        </table>
+        <div class="table-container">
+          <table class="admin-table responsive-table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Correo</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="adminTableBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="stock-panel">
@@ -51,11 +63,22 @@
         <form id="stockForm" class="stock-form">
           <label>
             Material / placa
-            <input id="stockMaterialInput" type="text" placeholder="Ej: MDF Blanco" required />
+            <input id="stockMaterialInput" 
+                   type="text" 
+                   placeholder="Ej: MDF Blanco" 
+                   autocomplete="off"
+                   autocapitalize="words"
+                   required />
           </label>
           <label>
             Valor por placa ($)
-            <input id="stockPriceInput" type="number" min="0" step="0.01" value="0" required />
+            <input id="stockPriceInput" 
+                   type="number" 
+                   min="0" 
+                   step="0.01" 
+                   value="0" 
+                   inputmode="decimal"
+                   required />
           </label>
           <div class="stock-form-actions">
             <button type="submit" class="btn primary">Guardar en stock</button>
@@ -66,16 +89,18 @@
 
       <section class="stock-panel">
         <h2>Listado actual</h2>
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th>Material</th>
-              <th>Valor $</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="stockTableBody"></tbody>
-        </table>
+        <div class="table-container">
+          <table class="stock-table responsive-table">
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th>Valor $</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="stockTableBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="stock-panel">
@@ -83,11 +108,22 @@
         <form id="edgeForm" class="stock-form">
           <label>
             Nombre / acabado
-            <input id="edgeNameInput" type="text" placeholder="Ej: PVC 22mm Roble" required />
+            <input id="edgeNameInput" 
+                   type="text" 
+                   placeholder="Ej: PVC 22mm Roble" 
+                   autocomplete="off"
+                   autocapitalize="words"
+                   required />
           </label>
           <label>
             Valor por metro ($)
-            <input id="edgePriceInput" type="number" min="0" step="0.01" value="0" required />
+            <input id="edgePriceInput" 
+                   type="number" 
+                   min="0" 
+                   step="0.01" 
+                   value="0" 
+                   inputmode="decimal"
+                   required />
           </label>
           <div class="stock-form-actions">
             <button type="submit" class="btn primary">Guardar cubre canto</button>
@@ -98,16 +134,18 @@
 
       <section class="stock-panel">
         <h2>Listado de cubre cantos</h2>
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th>Cubre canto</th>
-              <th>Valor $/m</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="edgeTableBody"></tbody>
-        </table>
+        <div class="table-container">
+          <table class="stock-table responsive-table">
+            <thead>
+              <tr>
+                <th>Cubre canto</th>
+                <th>Valor $/m</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="edgeTableBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="stock-actions-panel">
@@ -125,6 +163,7 @@
     <script src="stock-sync-config.js"></script>
     <script src="stock-sync.js"></script>
     <script src="auth.js"></script>
+    <script src="mobile-utils.js"></script>
     <script src="stock.js"></script>
   </body>
 </html>

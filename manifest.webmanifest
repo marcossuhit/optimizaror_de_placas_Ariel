@@ -1,12 +1,92 @@
 {
   "name": "PCAMOBLAMIENTOS · Planificador de Cortes",
   "short_name": "PCAMOBLA",
+  "description": "Planificador de cortes para carpintería - Optimiza tus placas y maximiza el aprovechamiento de material",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#050607",
   "theme_color": "#050607",
-  "orientation": "portrait",
+  "orientation": "any",
+  "scope": "./",
+  "categories": ["productivity", "utilities", "business"],
+  "lang": "es",
+  "dir": "ltr",
   "icons": [
-    { "src": "icons/pcicon.jpeg", "sizes": "1179x1090", "type": "image/jpeg", "purpose": "any maskable" }
-  ]
+    { 
+      "src": "icons/pcicon.jpeg", 
+      "sizes": "1179x1090", 
+      "type": "image/jpeg", 
+      "purpose": "any maskable" 
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png", 
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "icons/pcicon.jpeg",
+      "sizes": "1179x1090",
+      "type": "image/jpeg",
+      "form_factor": "wide"
+    }
+  ],
+  "display_override": ["window-controls-overlay", "standalone"],
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "shortcuts": [
+    {
+      "name": "Nuevo Proyecto",
+      "short_name": "Nuevo",
+      "description": "Crear un nuevo proyecto de planificación de cortes",
+      "url": "./",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Backoffice Stock",
+      "short_name": "Stock",
+      "description": "Gestionar el stock de placas y materiales",
+      "url": "./stock.html",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "edge_side_panel": {
+    "preferred_width": 400
+  }
 }

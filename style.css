@@ -1593,3 +1593,476 @@ body.dialog-open {
 text.piece-cut-number {
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
 }
+
+/* ======================================
+   ESTILOS RESPONSIVOS PARA MÓVILES
+   ====================================== */
+
+/* Hamburger menu button (hidden by default) */
+.mobile-nav-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.8rem;
+  cursor: pointer;
+  padding: 8px;
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+/* Mobile navigation styles */
+.mobile-nav {
+  display: none;
+}
+
+/* Toast notifications for mobile feedback */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--panel);
+  color: var(--text);
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast.toast-success {
+  border-color: #22c55e;
+  background: linear-gradient(135deg, var(--panel), rgba(34, 197, 94, 0.1));
+}
+
+.toast.toast-error {
+  border-color: var(--danger);
+  background: linear-gradient(135deg, var(--panel), rgba(239, 68, 68, 0.1));
+}
+
+.toast.toast-warning {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, var(--panel), rgba(245, 158, 11, 0.1));
+}
+
+/* Loading spinner for buttons */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Media Queries para tablets (768px y menos) */
+@media (max-width: 768px) {
+  /* Header adaptativo */
+  .app-header {
+    padding: 20px 16px 16px;
+    gap: 12px;
+  }
+  
+  .app-header h1 {
+    font-size: 1.8rem;
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+  }
+  
+  .app-title-icon {
+    width: 64px;
+    height: 64px;
+  }
+  
+  .user-session {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+  
+  .user-meta {
+    text-align: center;
+    max-width: none;
+  }
+  
+  /* Container y layout principal */
+  .container {
+    padding: 16px 12px;
+  }
+  
+  .main-grid {
+    display: block;
+  }
+  
+  .summary {
+    margin-top: 24px;
+    order: 2;
+  }
+  
+  /* Controles y botones */
+  .controls {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .project {
+    width: 100%;
+  }
+  
+  .export-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  
+  /* Formularios y inputs */
+  input, select, textarea {
+    font-size: 16px; /* Previene zoom automático en iOS */
+    padding: 12px 16px;
+    min-height: 48px; /* Tamaño mínimo touch-friendly */
+  }
+  
+  /* Botones touch-friendly */
+  .btn {
+    min-height: 48px;
+    padding: 12px 16px;
+    font-size: 14px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  
+  /* Placas y controles */
+  .plates-controls {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .plate-material,
+  .plate-edge-catalog {
+    width: 100%;
+  }
+  
+  .plate {
+    gap: 8px;
+  }
+  
+  .plate-input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  
+  /* Filas y controles de filas */
+  .rows-controls {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .rows-controls label {
+    align-self: center;
+  }
+  
+  /* Canvas y visualización */
+  .sheet-canvas {
+    min-height: 300px;
+  }
+  
+  /* Redes sociales */
+  .social-links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  
+  .social-links a {
+    padding: 12px 8px;
+    text-align: center;
+  }
+}
+
+/* Media Queries para móviles (480px y menos) */
+@media (max-width: 480px) {
+  /* Header más compacto */
+  .app-header {
+    padding: 16px 12px 12px;
+  }
+  
+  .app-header h1 {
+    font-size: 1.5rem;
+  }
+  
+  .app-title-icon {
+    width: 48px;
+    height: 48px;
+  }
+  
+  /* Container más estrecho */
+  .container {
+    padding: 12px 8px;
+  }
+  
+  /* Botones en grid de una columna */
+  .export-group {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  /* Placas en formato más compacto */
+  .plate {
+    padding: 12px;
+    gap: 8px;
+  }
+  
+  .plate-controls {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  /* Inputs más grandes para dedos */
+  input, select, textarea {
+    padding: 14px 16px;
+    min-height: 52px;
+    font-size: 16px;
+  }
+  
+  .btn {
+    min-height: 52px;
+    padding: 14px 20px;
+    font-size: 16px;
+  }
+  
+  /* Redes sociales en una columna */
+  .social-links {
+    grid-template-columns: 1fr;
+  }
+  
+  /* Summary panel más compacto */
+  .summary {
+    padding: 16px 12px;
+  }
+  
+  .summary-stat {
+    font-size: 14px;
+    padding: 8px 0;
+  }
+  
+  /* Canvas más pequeño pero usable */
+  .sheet-canvas {
+    min-height: 250px;
+  }
+}
+
+/* Media Queries para pantallas muy pequeñas (360px y menos) */
+@media (max-width: 360px) {
+  .app-header h1 {
+    font-size: 1.3rem;
+  }
+  
+  .container {
+    padding: 8px 6px;
+  }
+  
+  .btn {
+    font-size: 14px;
+    padding: 12px 16px;
+  }
+  
+  input, select, textarea {
+    padding: 12px 14px;
+    font-size: 16px;
+  }
+}
+
+/* Estilos específicos para login en móvil */
+@media (max-width: 768px) {
+  .login-wrapper--pc {
+    padding: 24px 16px;
+    min-height: 100vh;
+    align-items: flex-start;
+    padding-top: 40px;
+  }
+  
+  .login-card--pc {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 24px 20px;
+  }
+  
+  .login-brand__image {
+    width: 80px;
+    height: 80px;
+  }
+  
+  .login-brand__title {
+    font-size: 1.8rem;
+  }
+  
+  .login-brand__highlights {
+    font-size: 14px;
+  }
+  
+  .login-actions .btn {
+    min-height: 52px;
+    font-size: 16px;
+  }
+}
+
+/* Estilos específicos para stock en móvil */
+@media (max-width: 768px) {
+  .stock-container {
+    padding: 16px 12px;
+  }
+  
+  .stock-header {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+  
+  .stock-header h1 {
+    font-size: 1.8rem;
+  }
+  
+  .admin-form-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .admin-form-actions,
+  .stock-form-actions {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .stock-actions-buttons {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  /* Tables responsive en stock */
+  .admin-table,
+  .stock-table {
+    font-size: 14px;
+    overflow-x: auto;
+    display: block;
+    white-space: nowrap;
+  }
+  
+  .admin-table thead,
+  .stock-table thead {
+    display: block;
+  }
+  
+  .admin-table tbody,
+  .stock-table tbody {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  
+  .admin-table tr,
+  .stock-table tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+}
+
+/* Landscape orientation optimizations para móviles */
+@media (max-width: 768px) and (orientation: landscape) {
+  .app-header {
+    padding: 12px 16px 8px;
+  }
+  
+  .app-header h1 {
+    font-size: 1.4rem;
+    flex-direction: row;
+    gap: 12px;
+  }
+  
+  .app-title-icon {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .container {
+    padding: 12px;
+  }
+  
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 16px;
+  }
+  
+  .summary {
+    margin-top: 0;
+  }
+}
+
+/* Mejoras de accesibilidad para móvil */
+@media (max-width: 768px) {
+  /* Mejor contraste en elementos pequeños */
+  .hint-inline,
+  .limit-note {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  
+  /* Espaciado entre elementos tocables */
+  .btn + .btn {
+    margin-top: 8px;
+  }
+  
+  /* Estados focus más visibles en móvil */
+  input:focus,
+  select:focus,
+  textarea:focus,
+  button:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  
+  /* Mejor feedback visual para checkboxes */
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+  }
+}
+
+/* Optimizaciones para dispositivos con notch */
+@supports (padding: max(0px)) {
+  .app-header {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: max(28px, env(safe-area-inset-top));
+  }
+  
+  .container {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
