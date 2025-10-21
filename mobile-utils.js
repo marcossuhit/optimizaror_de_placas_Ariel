@@ -219,6 +219,53 @@ function enhanceTouchFeedback() {
   });
 }
 
+// Gestión de vista previa en móviles
+function manageMobilePreview() {
+  if (!isMobileDevice()) return;
+  
+  const sheetOverview = document.querySelector('.sheet-overview');
+  if (!sheetOverview) return;
+  
+  // Ocultar por defecto en móviles
+  sheetOverview.style.display = 'none';
+  
+  // Crear botón toggle si no existe
+  let toggleBtn = document.querySelector('.mobile-preview-toggle');
+  if (!toggleBtn) {
+    toggleBtn = document.createElement('button');
+    toggleBtn.className = 'mobile-preview-toggle';
+    toggleBtn.textContent = '👁️ Mostrar vista previa de placa';
+    toggleBtn.type = 'button';
+    
+    // Insertar antes de la sección de vista previa
+    sheetOverview.parentNode.insertBefore(toggleBtn, sheetOverview);
+    
+    // Event listener para toggle
+    toggleBtn.addEventListener('click', function() {
+      const isVisible = sheetOverview.style.display !== 'none';
+      
+      if (isVisible) {
+        sheetOverview.style.display = 'none';
+        sheetOverview.classList.remove('mobile-visible');
+        this.textContent = '👁️ Mostrar vista previa de placa';
+        showToast('Vista previa oculta para ahorrar espacio', 'info', 2000);
+      } else {
+        sheetOverview.style.display = 'block';
+        sheetOverview.classList.add('mobile-visible');
+        this.textContent = '🙈 Ocultar vista previa';
+        showToast('Vista previa visible', 'success', 2000);
+        
+        // Scroll suave hacia la vista previa
+        setTimeout(() => {
+          sheetOverview.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start' 
+          });
+        }, 100);
+      }
+    });
+  }
+}
 // Mejorar accesibilidad en móvil
 function enhanceMobileAccessibility() {
   // Asegurar que los elementos tocables tengan tamaño mínimo
@@ -288,6 +335,7 @@ function initMobileOptimizations() {
     enhanceMobileAccessibility();
     handleOrientationChange();
     preventAccidentalZoom();
+    manageMobilePreview(); // Gestionar vista previa en móviles
     
     console.log('✅ Optimizaciones móviles aplicadas correctamente');
     
@@ -350,5 +398,6 @@ window.mobileUtils = {
   optimizeInputsForMobile,
   makeTablesResponsive,
   optimizeFormsForTouch,
+  manageMobilePreview,
   initMobileOptimizations
 };

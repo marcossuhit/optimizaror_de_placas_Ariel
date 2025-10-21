@@ -78,14 +78,28 @@ Se han implementado mejoras integrales para hacer la interfaz más amigable en d
 - Tablas con scroll horizontal y etiquetas de datos
 - Botones de acción apilados verticalmente
 
-### 9. **Accesibilidad y UX Mejorada**
+### 9. **Gestión Inteligente de Vista Previa**
+- **Vista previa oculta por defecto** en dispositivos móviles para ahorrar espacio valioso
+- **Botón toggle opcional** para mostrar/ocultar la vista previa cuando se necesite
+- **Scroll automático** hacia la vista previa cuando se activa
+- **Feedback visual** con toast notifications
+- **Totalmente visible en desktop** - sin cambios en la experiencia desktop
+
+### 10. **Accesibilidad y UX Mejorada**
 - **Contraste mejorado** en elementos pequeños
 - **Feedback visual** inmediato en interacciones
 - **Estados de loading** claros y informativos
 - **Mensajes de error** user-friendly con toast notifications
 - **Safe area support** para dispositivos con notch
 
-### 10. **Optimizaciones de Rendimiento**
+### 10. **Accesibilidad y UX Mejorada**
+- **Contraste mejorado** en elementos pequeños
+- **Feedback visual** inmediato en interacciones
+- **Estados de loading** claros y informativos
+- **Mensajes de error** user-friendly con toast notifications
+- **Safe area support** para dispositivos con notch
+
+### 11. **Optimizaciones de Rendimiento**
 - **Observer patterns** para aplicar mejoras solo cuando es necesario
 - **Detección inteligente** de capacidades del dispositivo
 - **Lazy loading** de optimizaciones no críticas
@@ -100,6 +114,8 @@ Se han implementado mejoras integrales para hacer la interfaz más amigable en d
 - ✅ Tablas legibles con scroll horizontal
 - ✅ Feedback visual inmediato
 - ✅ Carga rápida y diseño responsive
+- ✅ **Vista previa oculta por defecto** para mejor uso del espacio
+- ✅ **Opción de mostrar vista previa** cuando sea necesario
 
 ### **Para la Aplicación:**
 - ✅ Mejor puntuación en Google PageSpeed Mobile

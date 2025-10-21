@@ -1787,6 +1787,39 @@ text.piece-cut-number {
     min-height: 300px;
   }
   
+  /* Ocultar vista previa en móviles para ahorrar espacio */
+  .sheet-overview {
+    display: none;
+  }
+  
+  /* Botón para mostrar vista previa en móvil (opcional) */
+  .mobile-preview-toggle {
+    display: block;
+    width: 100%;
+    margin: 16px 0;
+    padding: 12px;
+    background: var(--panel-alt);
+    border: 1px solid var(--stroke);
+    color: var(--text);
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  
+  .mobile-preview-toggle:hover {
+    background: var(--panel);
+  }
+  
+  /* Mostrar vista previa cuando se activa */
+  .sheet-overview.mobile-visible {
+    display: block;
+    margin-top: 16px;
+  }
+  
+  .sheet-overview.mobile-visible .sheet-canvas {
+    min-height: 200px;
+  }
+  
   /* Redes sociales */
   .social-links {
     display: grid;
@@ -1870,6 +1903,11 @@ text.piece-cut-number {
   .sheet-canvas {
     min-height: 250px;
   }
+  
+  /* Vista previa oculta en móviles para mejor uso del espacio */
+  .sheet-overview {
+    display: none;
+  }
 }
 
 /* Media Queries para pantallas muy pequeñas (360px y menos) */
@@ -1890,6 +1928,11 @@ text.piece-cut-number {
   input, select, textarea {
     padding: 12px 14px;
     font-size: 16px;
+  }
+  
+  /* Vista previa completamente oculta en pantallas muy pequeñas */
+  .sheet-overview {
+    display: none !important;
   }
 }
 
@@ -2064,5 +2107,16 @@ text.piece-cut-number {
     padding-left: max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
     padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Asegurar que la vista previa se muestre en desktop */
+@media (min-width: 769px) {
+  .sheet-overview {
+    display: block !important;
+  }
+  
+  .mobile-preview-toggle {
+    display: none !important;
   }
 }
