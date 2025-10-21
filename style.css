@@ -1789,7 +1789,7 @@ text.piece-cut-number {
   
   /* Ocultar vista previa en móviles para ahorrar espacio */
   .sheet-overview {
-    display: none;
+    display: none !important;
   }
   
   /* Botón para mostrar vista previa en móvil (opcional) */
@@ -1906,7 +1906,7 @@ text.piece-cut-number {
   
   /* Vista previa oculta en móviles para mejor uso del espacio */
   .sheet-overview {
-    display: none;
+    display: none !important;
   }
 }
 
@@ -2110,10 +2110,40 @@ text.piece-cut-number {
   }
 }
 
+/* REGLAS IMPORTANTES: Vista previa móvil vs desktop */
+/* Clase específica para ocultar en móviles */
+.mobile-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Ocultar vista previa en dispositivos móviles y tablets */
+@media (max-width: 768px) {
+  .sheet-overview:not(.mobile-visible) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  .mobile-preview-toggle {
+    display: block !important;
+  }
+}
+
 /* Asegurar que la vista previa se muestre en desktop */
 @media (min-width: 769px) {
   .sheet-overview {
     display: block !important;
+    visibility: visible !important;
+    height: auto !important;
+    overflow: visible !important;
   }
   
   .mobile-preview-toggle {

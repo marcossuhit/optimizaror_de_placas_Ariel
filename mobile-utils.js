@@ -226,8 +226,14 @@ function manageMobilePreview() {
   const sheetOverview = document.querySelector('.sheet-overview');
   if (!sheetOverview) return;
   
-  // Ocultar por defecto en móviles
+  // Forzar ocultado en móviles con múltiples métodos
   sheetOverview.style.display = 'none';
+  sheetOverview.style.visibility = 'hidden';
+  sheetOverview.style.height = '0';
+  sheetOverview.style.overflow = 'hidden';
+  sheetOverview.style.margin = '0';
+  sheetOverview.style.padding = '0';
+  sheetOverview.classList.add('mobile-hidden');
   
   // Crear botón toggle si no existe
   let toggleBtn = document.querySelector('.mobile-preview-toggle');
@@ -242,15 +248,29 @@ function manageMobilePreview() {
     
     // Event listener para toggle
     toggleBtn.addEventListener('click', function() {
-      const isVisible = sheetOverview.style.display !== 'none';
+      const isVisible = !sheetOverview.classList.contains('mobile-hidden');
       
       if (isVisible) {
+        // Ocultar vista previa
         sheetOverview.style.display = 'none';
+        sheetOverview.style.visibility = 'hidden';
+        sheetOverview.style.height = '0';
+        sheetOverview.style.overflow = 'hidden';
+        sheetOverview.style.margin = '0';
+        sheetOverview.style.padding = '0';
+        sheetOverview.classList.add('mobile-hidden');
         sheetOverview.classList.remove('mobile-visible');
         this.textContent = '👁️ Mostrar vista previa de placa';
         showToast('Vista previa oculta para ahorrar espacio', 'info', 2000);
       } else {
+        // Mostrar vista previa
         sheetOverview.style.display = 'block';
+        sheetOverview.style.visibility = 'visible';
+        sheetOverview.style.height = 'auto';
+        sheetOverview.style.overflow = 'visible';
+        sheetOverview.style.margin = '16px 0 0 0';
+        sheetOverview.style.padding = '12px';
+        sheetOverview.classList.remove('mobile-hidden');
         sheetOverview.classList.add('mobile-visible');
         this.textContent = '🙈 Ocultar vista previa';
         showToast('Vista previa visible', 'success', 2000);
@@ -350,10 +370,32 @@ function initMobileOptimizations() {
   }
 }
 
+// Función para ocultar vista previa inmediatamente
+function hidePreviewImmediately() {
+  if (!isMobileDevice()) return;
+  
+  const sheetOverview = document.querySelector('.sheet-overview');
+  if (sheetOverview) {
+    sheetOverview.style.display = 'none';
+    sheetOverview.style.visibility = 'hidden';
+    sheetOverview.style.height = '0';
+    sheetOverview.style.overflow = 'hidden';
+    sheetOverview.classList.add('mobile-hidden');
+    console.log('🔒 Vista previa oculta inmediatamente en móvil');
+  }
+}
+
+// Ejecutar inmediatamente si es móvil
+hidePreviewImmediately();
+
 // Event listeners para inicialización
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initMobileOptimizations);
+  document.addEventListener('DOMContentLoaded', function() {
+    hidePreviewImmediately(); // Ejecutar de nuevo por si acaso
+    initMobileOptimizations();
+  });
 } else {
+  hidePreviewImmediately(); // Ejecutar de nuevo por si acaso
   initMobileOptimizations();
 }
 

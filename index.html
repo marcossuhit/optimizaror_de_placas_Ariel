@@ -154,12 +154,33 @@
         </aside>
       </div>
 
-      <section class="sheet-overview">
+      <section class="sheet-overview" id="sheetOverview">
         <h2 class="sheet-title">Placa completa</h2>
         <div id="sheetCanvas" class="sheet-canvas">
           <div class="hint">Configure la placa para ver la vista</div>
         </div>
       </section>
+      
+      <!-- Script inline para ocultar vista previa inmediatamente en móviles -->
+      <script>
+        (function() {
+          // Detectar si es móvil
+          var isMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (isMobile) {
+            var preview = document.getElementById('sheetOverview');
+            if (preview) {
+              preview.style.display = 'none';
+              preview.style.visibility = 'hidden';
+              preview.style.height = '0';
+              preview.style.overflow = 'hidden';
+              preview.style.margin = '0';
+              preview.style.padding = '0';
+              preview.classList.add('mobile-hidden');
+              console.log('📱 Vista previa oculta por script inline');
+            }
+          }
+        })();
+      </script>
 
       <!-- Panel oculto de visitas (solo visible con atajo) -->
       <section id="adminPanel" style="display:none; margin-top:16px;" class="sheet">
