@@ -4623,12 +4623,34 @@ function renderAdvancedSolution(optimizationResult, plateSpec) {
       svg.appendChild(trimRect);
     }
     
+    // Crear mapa de agrupación por dimensiones para numeración consistente
+    const dimensionGroups = new Map();
+    let cutTypeCounter = 1;
+    
+    // Agrupar piezas por dimensiones (ancho x alto)
+    placedPieces.forEach((p) => {
+      const key = `${p.width.toFixed(0)}x${p.height.toFixed(0)}`;
+      if (!dimensionGroups.has(key)) {
+        dimensionGroups.set(key, {
+          cutNumber: cutTypeCounter++,
+          pieces: [],
+          width: p.width,
+          height: p.height
+        });
+      }
+      dimensionGroups.get(key).pieces.push(p);
+    });
+
     // Dibujar piezas
     placedPieces.forEach((p, idx) => {
       const pxX = ox + p.x * scale;
       const pxY = oy + p.y * scale;
       const pxW = Math.max(1, p.width * scale);
       const pxH = Math.max(1, p.height * scale);
+      
+      // Obtener número de corte basado en dimensiones
+      const dimensionKey = `${p.width.toFixed(0)}x${p.height.toFixed(0)}`;
+      const cutNumber = dimensionGroups.get(dimensionKey).cutNumber;
       
       // Rectángulo exterior (borde)
       const outer = document.createElementNS(svgNS, 'rect');
@@ -4682,6 +4704,21 @@ function renderAdvancedSolution(optimizationResult, plateSpec) {
         heightLabel.textContent = `${p.height.toFixed(0)}`;
         svg.appendChild(heightLabel);
         
+        // Número de corte en el centro
+        const cutNumberFontSize = Math.max(10, Math.min(pxW, pxH) * 0.15);
+        const cutNumberLabel = document.createElementNS(svgNS, 'text');
+        cutNumberLabel.setAttribute('class', 'piece-cut-number');
+        cutNumberLabel.setAttribute('text-anchor', 'middle');
+        cutNumberLabel.setAttribute('x', String(pxX + pxW / 2));
+        cutNumberLabel.setAttribute('y', String(pxY + pxH / 2 + cutNumberFontSize / 3));
+        cutNumberLabel.setAttribute('font-size', String(cutNumberFontSize));
+        cutNumberLabel.setAttribute('fill', '#fff');
+        cutNumberLabel.setAttribute('font-weight', 'bold');
+        cutNumberLabel.setAttribute('stroke', '#000');
+        cutNumberLabel.setAttribute('stroke-width', '0.5');
+        cutNumberLabel.textContent = String(cutNumber);
+        svg.appendChild(cutNumberLabel);
+        
         // Indicador de rotación
         if (p.piece.rotated) {
           const rotLabel = document.createElementNS(svgNS, 'text');
@@ -4695,6 +4732,21 @@ function renderAdvancedSolution(optimizationResult, plateSpec) {
           rotLabel.textContent = '↻';
           svg.appendChild(rotLabel);
         }
+      } else {
+        // Para piezas pequeñas, solo mostrar el número de corte
+        const cutNumberFontSize = Math.max(8, Math.min(pxW, pxH) * 0.25);
+        const cutNumberLabel = document.createElementNS(svgNS, 'text');
+        cutNumberLabel.setAttribute('class', 'piece-cut-number');
+        cutNumberLabel.setAttribute('text-anchor', 'middle');
+        cutNumberLabel.setAttribute('x', String(pxX + pxW / 2));
+        cutNumberLabel.setAttribute('y', String(pxY + pxH / 2 + cutNumberFontSize / 3));
+        cutNumberLabel.setAttribute('font-size', String(cutNumberFontSize));
+        cutNumberLabel.setAttribute('fill', '#fff');
+        cutNumberLabel.setAttribute('font-weight', 'bold');
+        cutNumberLabel.setAttribute('stroke', '#000');
+        cutNumberLabel.setAttribute('stroke-width', '0.5');
+        cutNumberLabel.textContent = String(cutNumber);
+        svg.appendChild(cutNumberLabel);
       }
       
       // Dibujar indicadores de cubre cantos
@@ -4969,6 +5021,7 @@ async function buildExportCanvasForPdf() {
     alert('No hay placas para exportar');
     return null;
   }
+  
   const margin = 20;
   const targetW = 1200;
   const images = await Promise.all(Array.from(svgs).map(svg => new Promise((resolve) => {
@@ -4979,6 +5032,12 @@ async function buildExportCanvasForPdf() {
   })));
   const scaled = images.map(({ img, w, h }) => ({ img, w: targetW, h: Math.round(h * (targetW / w)) }));
 
+  // Si hay múltiples placas, crear una página por placa
+  if (scaled.length > 1) {
+    return buildMultiPagePdf(scaled, svgs);
+  }
+
+  // Si hay una sola placa, usar el formato original
   const summaryTexts = [];
   const addSummary = (text) => {
     const trimmed = (text || '').trim();
@@ -5215,6 +5274,378 @@ async function buildExportCanvasForPdf() {
   return { canvas, title, projectName };
 }
 
+// Función para crear PDF multi-página
+async function buildMultiPagePdf(scaledImages, svgs) {
+  const pages = [];
+  const margin = 20;
+  const targetW = 1200;
+  
+  for (let plateIndex = 0; plateIndex < scaledImages.length; plateIndex++) {
+    const { img, w, h } = scaledImages[plateIndex];
+    const svg = svgs[plateIndex];
+    
+    // Crear resumen específico para esta placa
+    const summaryTexts = [];
+    const addSummary = (text) => {
+      summaryTexts.push(text);
+    };
+    
+    // Crear detalle de cortes para esta placa
+    const cutsTexts = [];
+    const addCuts = (text) => {
+      cutsTexts.push(text);
+    };
+    
+    // Obtener elementos del DOM
+    const projectNameEl = document.getElementById('projectName');
+    const summaryListEl = document.getElementById('summaryList');
+    const summaryPlatesValueEl = document.getElementById('summaryPlatesValue');
+    const summaryTotalEl = document.getElementById('summaryTotal');
+    const summaryGrandTotalEl = document.getElementById('summaryGrandTotal');
+    
+    // Extraer información específica de esta placa
+    if (summaryListEl && summaryListEl.children) {
+      const plateCards = [];
+      for (let i = 0; i < summaryListEl.children.length; i++) {
+        const child = summaryListEl.children[i];
+        if (child.style.background && (
+          child.style.background.includes('rgb(14, 22, 41)') || 
+          child.style.background.includes('#0e1629') ||
+          child.style.background.includes('0e1629')
+        )) {
+          plateCards.push(child);
+        }
+      }
+      
+      // Solo mostrar información de la placa actual
+      if (plateCards[plateIndex]) {
+        const card = plateCards[plateIndex];
+        addSummary('DETALLE DE PLACA:');
+        
+        const fullText = card.textContent || '';
+        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        
+        lines.forEach((line) => {
+          const cleaned = line.replace(/📋|📐|📦|📊|♻️|✅|⚙️|💰|💵/g, '').trim();
+          if (cleaned) {
+            if (cleaned.startsWith('Placa')) {
+              addSummary(cleaned);
+            } else {
+              addSummary(`  ${cleaned}`);
+            }
+          }
+        });
+        
+        // Extraer información de cubre cantos del SVG de esta placa
+        const edgeBandLines = svg.querySelectorAll('.edge-band-line');
+        if (edgeBandLines.length > 0) {
+          const edgesByName = {};
+          edgeBandLines.forEach((line) => {
+            const name = (line.getAttribute('data-edge-name') || '').trim();
+            if (!name || name.toUpperCase() === 'BLANCO') return;
+            
+            const pieceW = parseFloat(line.getAttribute('data-piece-raww') || '0');
+            const pieceH = parseFloat(line.getAttribute('data-piece-rawh') || '0');
+            const orientation = (line.getAttribute('data-edge-orientation') || '').trim();
+            
+            let lengthMm = 0;
+            if (orientation === 'horizontal') {
+              lengthMm = pieceW;
+            } else if (orientation === 'vertical') {
+              lengthMm = pieceH;
+            }
+            
+            const lengthM = lengthMm / 1000;
+            
+            if (lengthM > 0) {
+              if (!edgesByName[name]) {
+                edgesByName[name] = 0;
+              }
+              edgesByName[name] += lengthM;
+            }
+          });
+          
+          const edgeNames = Object.keys(edgesByName).sort();
+          if (edgeNames.length > 0) {
+            addSummary(`  Cubre Cantos:`);
+            edgeNames.forEach(name => {
+              const meters = edgesByName[name];
+              addSummary(`    - ${name}: ${meters.toFixed(2)} m`);
+            });
+          }
+        }
+        addSummary('');
+      }
+    }
+    
+    // Extraer información de cortes de esta placa específica
+    addCuts('DETALLE DE CORTES:');
+    addCuts('');
+    
+    // Obtener las piezas colocadas en esta placa desde el SVG
+    const pieceRects = svg.querySelectorAll('.piece-rect');
+    if (pieceRects.length > 0) {
+      // Crear mapa para agrupar cortes por dimensiones
+      const cutGroups = new Map();
+      
+      pieceRects.forEach((rect) => {
+        // Obtener las dimensiones de la pieza desde los elementos de texto
+        const svgElement = rect.closest('svg');
+        if (!svgElement) return;
+        
+        // Buscar los labels de dimensiones asociados a esta pieza
+        const rectX = parseFloat(rect.getAttribute('x') || '0');
+        const rectY = parseFloat(rect.getAttribute('y') || '0');
+        const rectW = parseFloat(rect.getAttribute('width') || '0');
+        const rectH = parseFloat(rect.getAttribute('height') || '0');
+        
+        // Buscar los textos de dimensiones cerca de esta pieza
+        const allTexts = svgElement.querySelectorAll('text.piece-label');
+        let width = 0, height = 0;
+        let hasRotation = false;
+        
+        allTexts.forEach((text) => {
+          const textX = parseFloat(text.getAttribute('x') || '0');
+          const textY = parseFloat(text.getAttribute('y') || '0');
+          
+          // Verificar si el texto está dentro del área de la pieza
+          if (textX >= rectX && textX <= rectX + rectW && 
+              textY >= rectY && textY <= rectY + rectH) {
+            const textContent = text.textContent?.trim();
+            
+            // Identificar si es indicador de rotación
+            if (textContent === '↻') {
+              hasRotation = true;
+            } else if (textContent && /^\d+$/.test(textContent)) {
+              const dimension = parseInt(textContent);
+              
+              // Determinar si es ancho o alto basado en la posición
+              const relativeY = textY - rectY;
+              const relativeHeight = rectH;
+              
+              if (relativeY > relativeHeight * 0.7) {
+                // Texto en la parte inferior = ancho
+                width = dimension;
+              } else {
+                // Texto en otra posición = alto
+                height = dimension;
+              }
+            }
+          }
+        });
+        
+        // Si no encontramos dimensiones en los textos, calcular desde atributos del SVG
+        if (width === 0 || height === 0) {
+          const scale = parseFloat(svgElement.dataset.scale || '1');
+          if (scale > 0) {
+            width = Math.round(rectW / scale);
+            height = Math.round(rectH / scale);
+          }
+        }
+        
+        // Extraer información de cubre cantos para esta pieza específica
+        const pieceEdges = [];
+        const edgeLines = svgElement.querySelectorAll('.edge-band-line');
+        edgeLines.forEach((line) => {
+          const lineX = parseFloat(line.getAttribute('x1') || line.getAttribute('x') || '0');
+          const lineY = parseFloat(line.getAttribute('y1') || line.getAttribute('y') || '0');
+          
+          // Verificar si la línea está dentro del área de esta pieza
+          if (lineX >= rectX && lineX <= rectX + rectW && 
+              lineY >= rectY && lineY <= rectY + rectH) {
+            const edgeName = line.getAttribute('data-edge-name');
+            const orientation = line.getAttribute('data-edge-orientation');
+            if (edgeName && edgeName.toUpperCase() !== 'BLANCO') {
+              pieceEdges.push(`${orientation === 'horizontal' ? 'H' : 'V'}: ${edgeName}`);
+            }
+          }
+        });
+        
+        // Agrupar por dimensiones
+        if (width > 0 && height > 0) {
+          const dimensionKey = `${width}x${height}`;
+          if (!cutGroups.has(dimensionKey)) {
+            cutGroups.set(dimensionKey, {
+              width: width,
+              height: height,
+              count: 0,
+              hasRotation: hasRotation,
+              edges: [...pieceEdges] // Copia de los cubre cantos
+            });
+          }
+          const group = cutGroups.get(dimensionKey);
+          group.count++;
+          
+          // Actualizar rotación si alguna pieza está rotada
+          if (hasRotation) {
+            group.hasRotation = true;
+          }
+          
+          // Combinar cubre cantos únicos
+          pieceEdges.forEach(edge => {
+            if (!group.edges.includes(edge)) {
+              group.edges.push(edge);
+            }
+          });
+        }
+      });
+      
+      // Generar la lista agrupada
+      let cutTypeNumber = 1;
+      const sortedGroups = Array.from(cutGroups.entries()).sort((a, b) => {
+        // Ordenar por área (ancho × alto)
+        const areaA = a[1].width * a[1].height;
+        const areaB = b[1].width * b[1].height;
+        return areaB - areaA; // De mayor a menor área
+      });
+      
+      sortedGroups.forEach(([dimensionKey, group]) => {
+        addCuts(`Corte ${cutTypeNumber}:`);
+        addCuts(`  Dimensiones: ${group.width} × ${group.height} mm`);
+        addCuts(`  Cantidad: ${group.count} pieza${group.count > 1 ? 's' : ''}`);
+        if (group.hasRotation) {
+          addCuts(`  Estado: Algunas rotadas`);
+        }
+        if (group.edges.length > 0) {
+          addCuts(`  Cubre Cantos:`);
+          group.edges.forEach(edge => {
+            addCuts(`    ${edge}`);
+          });
+        }
+        addCuts('');
+        cutTypeNumber++;
+      });
+      
+      // Verificar si no se encontraron cortes válidos
+      if (cutGroups.size === 0) {
+        addCuts('No se encontraron cortes en esta placa.');
+      }
+    } else {
+      addCuts('No se encontraron cortes en esta placa.');
+    }
+    
+    // Configurar dimensiones para esta página con múltiples columnas para cortes
+    const summaryLineHeight = 20;
+    const cutsLineHeight = 16; // Menor altura para las líneas de cortes
+    const headingHeight = 20;
+    const contentGap = 6;
+    const summaryStartY = margin + 44;
+    const bodyStartY = summaryStartY + headingHeight + contentGap;
+    
+    // Organizar cortes en grupos de 3 por columna
+    const cutsPerColumn = 3;
+    const cutsColumns = [];
+    let currentColumn = [];
+    let currentCutCount = 0;
+    
+    // Procesar las líneas de cortes para agruparlas
+    for (let i = 0; i < cutsTexts.length; i++) {
+      const line = cutsTexts[i];
+      
+      // Si la línea empieza con "Corte", es un nuevo corte
+      if (line.startsWith('Corte ')) {
+        // Si ya tenemos 3 cortes en la columna actual, crear nueva columna
+        if (currentCutCount >= cutsPerColumn) {
+          cutsColumns.push([...currentColumn]);
+          currentColumn = [];
+          currentCutCount = 0;
+        }
+        currentCutCount++;
+      }
+      
+      currentColumn.push(line);
+    }
+    
+    // Agregar la última columna si tiene contenido
+    if (currentColumn.length > 0) {
+      cutsColumns.push(currentColumn);
+    }
+    
+    // Si no hay cortes, crear una columna con el mensaje
+    if (cutsColumns.length === 0) {
+      cutsColumns.push(['DETALLE DE CORTES:', '', 'No se encontraron cortes en esta placa.']);
+    }
+    
+    // Calcular dimensiones de las columnas
+    const plateColumnWidth = Math.min(300, targetW * 0.25); // Columna de detalle de placa más estrecha
+    const cutsColumnWidth = Math.min(250, (targetW - plateColumnWidth - margin * 2) / cutsColumns.length);
+    const leftColumnHeight = summaryTexts.length * summaryLineHeight;
+    
+    // Calcular altura máxima de todas las columnas de cortes con el nuevo espaciado
+    const maxCutsColumnHeight = Math.max(...cutsColumns.map(col => col.length * cutsLineHeight));
+    const maxColumnHeight = Math.max(leftColumnHeight, maxCutsColumnHeight);
+    const summaryBlockBottom = bodyStartY + maxColumnHeight;
+    const headerH = Math.max(120, summaryBlockBottom + margin);
+    
+    const totalH = headerH + margin + h + margin;
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW + margin * 2;
+    canvas.height = totalH;
+    const ctx = canvas.getContext('2d');
+    
+    // Fondo blanco
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Título
+    ctx.fillStyle = '#111827';
+    ctx.font = 'bold 20px system-ui';
+    const projectName = (projectNameEl?.value || '').trim();
+    const title = `${projectName || 'Plano de cortes'} - Placa ${plateIndex + 1}`;
+    ctx.fillText(title, margin, 34);
+    
+    // Configurar posiciones de columnas
+    const leftX = margin;
+    
+    // Columna izquierda: Detalle de la placa
+    ctx.font = 'bold 16px system-ui';
+    ctx.fillText('Detalle de Placa', leftX, summaryStartY);
+    
+    ctx.font = '14px system-ui';
+    summaryTexts.forEach((line, idx) => {
+      ctx.fillText(line, leftX, bodyStartY + idx * summaryLineHeight);
+    });
+    
+    // Columnas de cortes: una por cada grupo de 3 cortes
+    cutsColumns.forEach((columnTexts, columnIndex) => {
+      const columnX = leftX + plateColumnWidth + 20 + (columnIndex * (cutsColumnWidth + 15));
+      
+      // Título de la columna de cortes
+      ctx.font = 'bold 12px system-ui';
+      if (columnIndex === 0) {
+        ctx.fillText('Detalle de Cortes', columnX, summaryStartY);
+      } else {
+        ctx.fillText('Cortes (cont.)', columnX, summaryStartY);
+      }
+      
+      // Contenido de la columna
+      ctx.font = '11px system-ui';
+      let lineIndex = 0;
+      
+      columnTexts.forEach((line, idx) => {
+        // Para columnas adicionales, saltar el título "DETALLE DE CORTES:" y su línea vacía
+        if (columnIndex > 0 && idx < 2 && (line === 'DETALLE DE CORTES:' || line === '')) {
+          return;
+        }
+        
+        ctx.fillText(line, columnX, bodyStartY + lineIndex * cutsLineHeight);
+        lineIndex++;
+      });
+    });
+    
+    // Dibujar la placa
+    ctx.drawImage(img, margin, headerH, w, h);
+    
+    pages.push({
+      canvas,
+      title,
+      projectName: projectName || 'Plano de cortes'
+    });
+  }
+  
+  return pages;
+}
+
 async function exportPNG() {
   // Tomar todos los SVG de la sección de placas y construir una imagen vertical
   const svgs = Array.from(document.querySelectorAll('#sheetCanvas svg'));
@@ -5277,16 +5708,76 @@ async function exportPNG() {
 async function exportPDF() {
   const result = await buildExportCanvasForPdf();
   if (!result) return;
-  const { canvas, projectName } = result;
-  const dataUrl = canvas.toDataURL('image/png');
-  const win = window.open('', '_blank');
-  if (!win) {
-    const name = (projectName || 'cortes').trim();
-    download(name ? `plano-${name.replace(/\s+/g, '_')}.png` : 'plano-cortes.png', dataUrl);
-    return;
+  
+  // Si el resultado es un array (múltiples páginas), manejar cada página
+  if (Array.isArray(result)) {
+    // Múltiples páginas - abrir en nueva ventana con todas las páginas
+    const win = window.open('', '_blank');
+    if (!win) {
+      // Si no se puede abrir ventana, descargar la primera página como PNG
+      const { canvas, projectName } = result[0];
+      const dataUrl = canvas.toDataURL('image/png');
+      const name = (projectName || 'cortes').trim();
+      download(name ? `plano-${name.replace(/\s+/g, '_')}-placa-1.png` : 'plano-cortes-placa-1.png', dataUrl);
+      return;
+    }
+    
+    // Crear HTML con todas las páginas
+    let htmlContent = `
+      <html>
+        <head>
+          <title>Plano de cortes - Múltiples placas</title>
+          <style>
+            body { margin: 0; padding: 20px; font-family: system-ui; }
+            .page { page-break-after: always; margin-bottom: 20px; }
+            .page:last-child { page-break-after: auto; }
+            img { width: 100%; max-width: 100%; height: auto; }
+            h2 { margin-top: 0; color: #111827; }
+            @media print {
+              body { padding: 0; }
+              .page { margin-bottom: 0; }
+            }
+          </style>
+        </head>
+        <body>
+    `;
+    
+    result.forEach((page, index) => {
+      const { canvas, title } = page;
+      const dataUrl = canvas.toDataURL('image/png');
+      htmlContent += `
+        <div class="page">
+          <h2>${title}</h2>
+          <img src="${dataUrl}" />
+        </div>
+      `;
+    });
+    
+    htmlContent += `
+          <script>
+            window.onload = function() {
+              setTimeout(() => window.print(), 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    
+    win.document.write(htmlContent);
+    win.document.close();
+  } else {
+    // Página única - comportamiento original
+    const { canvas, projectName } = result;
+    const dataUrl = canvas.toDataURL('image/png');
+    const win = window.open('', '_blank');
+    if (!win) {
+      const name = (projectName || 'cortes').trim();
+      download(name ? `plano-${name.replace(/\s+/g, '_')}.png` : 'plano-cortes.png', dataUrl);
+      return;
+    }
+    win.document.write(`<html><head><title>Plano de cortes</title><style>body{margin:0} img{width:100%;}</style></head><body><img src="${dataUrl}" onload="setTimeout(()=>window.print(), 250)" /></body></html>`);
+    win.document.close();
   }
-  win.document.write(`<html><head><title>Plano de cortes</title><style>body{margin:0} img{width:100%;}</style></head><body><img src="${dataUrl}" onload="setTimeout(()=>window.print(), 250)" /></body></html>`);
-  win.document.close();
 }
 
 function canvasToPdfBlob(canvas) {
